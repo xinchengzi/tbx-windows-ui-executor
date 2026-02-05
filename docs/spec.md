@@ -71,7 +71,7 @@
 ### 3.2 DPI-aware 要求
 - 进程必须启用 **Per-Monitor DPI Aware V2**。
 - API 响应必须携带：
-  - `dpiX`, `dpiY` 或 `scale`（如 1.75）
+  - `dpi` / `scale`（单值或 `{x,y}`，如 `scale = 1.75`）
   - `windowRectPx` / `regionRectPx`（物理像素）
   - `screenId`（单屏也保留字段，便于未来扩展）
 

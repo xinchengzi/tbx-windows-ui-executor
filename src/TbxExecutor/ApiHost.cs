@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
@@ -105,8 +104,11 @@ public sealed class ApiHost : IDisposable
         var lockStateProvider = OperatingSystem.IsWindows()
             ? new WindowsLockStateProvider()
             : new NullLockStateProvider();
+        var displayEnvProvider = OperatingSystem.IsWindows()
+            ? new WindowsDisplayEnvironmentProvider()
+            : new NullDisplayEnvironmentProvider();
         var captureProvider = OperatingSystem.IsWindows()
-            ? new WindowsCaptureProvider()
+            ? new WindowsCaptureProvider(displayEnvProvider)
             : new NullCaptureProvider();
 
         // Middleware: lock state guard
@@ -146,12 +148,29 @@ public sealed class ApiHost : IDisposable
 
         app.MapGet("/env", (HttpContext ctx) =>
         {
-            // placeholders; filled in later (DPI, monitors)
+            // Windows: report per-monitor bounds + dpi/scale (physical pixels)
+            // Non-Windows: empty list
+            var displays = displayEnvProvider.GetDisplays()
+                .Select(d => new
+                {
+                    index = d.Index,
+                    deviceName = d.DeviceName,
+                    isPrimary = d.IsPrimary,
+                    boundsRectPx = new { x = d.BoundsRectPx.X, y = d.BoundsRectPx.Y, w = d.BoundsRectPx.W, h = d.BoundsRectPx.H },
+                    workAreaRectPx = new { x = d.WorkAreaRectPx.X, y = d.WorkAreaRectPx.Y, w = d.WorkAreaRectPx.W, h = d.WorkAreaRectPx.H },
+                    dpi = new { x = d.DpiX, y = d.DpiY },
+                    scale = new { x = d.ScaleX, y = d.ScaleY }
+                })
+                .ToArray();
+
+            var vs = displayEnvProvider.GetVirtualScreenRectPx();
+
             var payload = new
             {
                 os = Environment.OSVersion.VersionString,
-                displays = Array.Empty<object>(),
-                coordinateSystem = "physicalPixels"
+                coordinateSystem = "physicalPixels",
+                virtualScreenRectPx = new { x = vs.X, y = vs.Y, w = vs.W, h = vs.H },
+                displays
             };
             return Results.Json(ApiResponse.Ok(ctx, payload));
         });
