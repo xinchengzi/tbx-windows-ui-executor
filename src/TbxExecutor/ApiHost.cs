@@ -139,6 +139,37 @@ public sealed class ApiHost : IDisposable
             await next();
         });
 
+        // Middleware: run concurrency guard (single-run at a time)
+        app.Use(async (ctx, next) =>
+        {
+            var path = ctx.Request.Path;
+            var needsGuard = path.StartsWithSegments("/macro/run")
+                || path.StartsWithSegments("/input");
+
+            if (!needsGuard)
+            {
+                await next();
+                return;
+            }
+
+            if (!RunGuard.Instance.TryAcquire())
+            {
+                ctx.Response.StatusCode = 429;
+                await Results.Json(ApiResponse.Error(ctx, 429, "BUSY"))
+                    .ExecuteAsync(ctx);
+                return;
+            }
+
+            try
+            {
+                await next();
+            }
+            finally
+            {
+                RunGuard.Instance.Release();
+            }
+        });
+
         // Routes
         app.MapGet("/health", (HttpContext ctx) =>
         {
@@ -422,6 +453,60 @@ public sealed class ApiHost : IDisposable
             return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
         });
 
+        app.MapPost("/macro/run", async (HttpContext ctx) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            }
+
+            MacroRunRequest? payload;
+            try
+            {
+                payload = await ctx.Request.ReadFromJsonAsync<MacroRunRequest>();
+            }
+            catch
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            if (payload?.Steps is null || payload.Steps.Length == 0)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            var executed = 0;
+            foreach (var step in payload.Steps)
+            {
+                if (step.DelayMs > 0)
+                {
+                    await System.Threading.Tasks.Task.Delay(step.DelayMs);
+                }
+
+                if (step.Mouse is not null)
+                {
+                    var result = mouseInputProvider.Execute(step.Mouse);
+                    if (!result.Ok)
+                    {
+                        return Results.Json(ApiResponse.Error(ctx, result.StatusCode ?? 500, result.Error ?? "MOUSE_FAILED"));
+                    }
+                }
+
+                if (step.Key is not null)
+                {
+                    var result = keyInputProvider.Execute(step.Key);
+                    if (!result.Ok)
+                    {
+                        return Results.Json(ApiResponse.Error(ctx, result.StatusCode ?? 500, result.Error ?? "KEY_FAILED"));
+                    }
+                }
+
+                executed++;
+            }
+
+            return Results.Json(ApiResponse.Ok(ctx, new { success = true, stepsExecuted = executed }));
+        });
+
         _app = app;
         await app.StartAsync();
     }
@@ -478,3 +563,10 @@ public sealed record CaptureWindowMatch(
     string? ProcessName);
 
 public sealed record CaptureRegion(int X, int Y, int W, int H);
+
+public sealed record MacroRunRequest(MacroStep[]? Steps);
+
+public sealed record MacroStep(
+    int DelayMs,
+    MouseInputRequest? Mouse,
+    KeyInputRequest? Key);
