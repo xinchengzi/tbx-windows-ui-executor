@@ -22,11 +22,11 @@ jobs:
       - name: Build (Release)
         run: dotnet build .\tbx-windows-ui-executor.sln -c Release --no-restore
 
-      - name: Publish (framework-dependent)
-        run: dotnet publish .\src\TbxExecutor\TbxExecutor.csproj -c Release -r win-x64 --self-contained false /p:PublishSingleFile=true /p:PublishTrimmed=false /p:DebugType=None /p:DebugSymbols=false
+      - name: Publish (framework-dependent, portable)
+        run: dotnet publish .\src\TbxExecutor\TbxExecutor.csproj -c Release --self-contained false /p:DebugType=None /p:DebugSymbols=false
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tbx-executor-win-x64
-          path: .\src\TbxExecutor\bin\Release\net8.0-windows\win-x64\publish\
+          name: tbx-executor-portable
+          path: .\src\TbxExecutor\bin\Release\net8.0-windows\publish\
