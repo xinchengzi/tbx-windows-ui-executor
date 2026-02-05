@@ -20,7 +20,7 @@
 ## 1. 约束与安全边界（硬性要求）
 
 ### 1.1 网络与鉴权
-- 监听地址：**仅绑定 Headscale/Tailscale 虚拟网卡 IP**（tailnet）。
+- 监听地址：**仅绑定 Headscale/Tailscale 虚拟网卡 IP**（tailnet），推荐显式指定 tailnet IP 并保留 allowlist。
 - 控制端：**单一控制端**，只允许来自 `mf-kvm01 (100.64.0.1)`。
 - 鉴权：`Authorization: Bearer <token>`（单 token，支持一键轮换）。
 - 传输：HTTP（内网），**不需要 HTTPS**。
@@ -163,7 +163,7 @@
 ## 6. 配置与托盘 UI
 
 ### 6.1 配置项
-- `listenHost`: tailnet IP（或自动选择 tailnet 网卡）
+- `listenHost`: tailnet IP（或 `tailnet` 自动选择），建议显式设置为 tailnet IP；`0.0.0.0` 表示全网卡监听（不推荐）
 - `listenPort`: 默认 17890
 - `token`: 随机生成，可轮换
 - `allowlistIps`: 默认 `["100.64.0.1"]`

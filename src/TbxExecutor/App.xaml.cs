@@ -27,6 +27,7 @@ public partial class App : Application
         }
 
         var config = ExecutorConfig.LoadOrCreate();
+        var listenHost = config.PickListenHost();
 
         _tray = new TrayHost(config);
         _tray.ExitRequested += (_, _) => Shutdown();
@@ -37,12 +38,12 @@ public partial class App : Application
         };
 
         _api = new ApiHost(config);
-        _tray.UpdateStatus($"Starting API on {config.ListenHost}:{config.ListenPort}");
+        _tray.UpdateStatus($"Starting API on {listenHost}:{config.ListenPort}");
 
         try
         {
             await _api.StartAsync();
-            _tray.UpdateStatus($"API listening on {config.ListenHost}:{config.ListenPort}");
+            _tray.UpdateStatus($"API listening on {listenHost}:{config.ListenPort}");
         }
         catch (Exception ex)
         {

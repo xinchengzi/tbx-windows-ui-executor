@@ -71,6 +71,9 @@ public sealed class ExecutorConfig
 
             var cfg = new ExecutorConfig();
 
+            if (doc.RootElement.TryGetProperty("listenHost", out var lh) && lh.ValueKind == JsonValueKind.String)
+                cfg.ListenHost = lh.GetString() ?? cfg.ListenHost;
+
             if (doc.RootElement.TryGetProperty("listenPort", out var lp) && lp.TryGetInt32(out var port))
                 cfg.ListenPort = port;
 
@@ -86,6 +89,18 @@ public sealed class ExecutorConfig
         {
             return new ExecutorConfig();
         }
+    }
+
+    public string PickListenHost()
+    {
+        var host = (ListenHost ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(host) || host.Equals("tailnet", StringComparison.OrdinalIgnoreCase))
+        {
+            var tailnet = TailnetBindingHelper.TryGetTailnetIp();
+            return string.IsNullOrWhiteSpace(tailnet) ? "0.0.0.0" : tailnet;
+        }
+
+        return host == "0.0.0.0" ? host : host;
     }
 
     private static string GenerateToken()

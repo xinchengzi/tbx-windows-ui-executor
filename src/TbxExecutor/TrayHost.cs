@@ -37,7 +37,8 @@ public sealed class TrayHost : IDisposable
         };
         copyEndpoint.Click += (_, _) =>
         {
-            var text = $"http://{_config.ListenHost}:{_config.ListenPort}";
+            var host = _config.PickListenHost();
+            var text = $"http://{host}:{_config.ListenPort}";
             Clipboard.SetText(text);
             UpdateStatus("Endpoint copied");
         };
