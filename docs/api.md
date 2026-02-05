@@ -206,6 +206,121 @@ curl -X POST http://100.115.92.6:17890/input/mouse \
   -d '{"kind":"click","x":500,"y":300,"humanize":{"jitterPx":2,"delayMs":[10,50]}}'
 ```
 
+## POST /input/key
+
+Performs keyboard input operations using SendInput.
+
+### Request
+
+```json
+{
+  "kind": "press",
+  "keys": ["CTRL", "L"],
+  "humanize": {
+    "delayMs": [10, 50]
+  }
+}
+```
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `kind` | string | **Yes** | Operation type: `press` |
+| `keys` | string[] | **Yes** | Array of key names to press |
+| `humanize` | object | No | Adds human-like randomness to input |
+| `humanize.delayMs` | [int, int] | No | Random delay range [min, max] in milliseconds between key events |
+
+### Operation Types
+
+| Kind | Description |
+|------|-------------|
+| `press` | Key down in order, then key up in reverse order (chord behavior) |
+
+### Supported Keys
+
+| Category | Keys |
+|----------|------|
+| Modifiers | `CTRL`, `ALT`, `SHIFT`, `WIN` |
+| Special | `ENTER`, `ESC`, `TAB`, `BACKSPACE`, `DELETE`, `SPACE` |
+| Navigation | `HOME`, `END`, `PAGEUP`, `PAGEDOWN`, `UP`, `DOWN`, `LEFT`, `RIGHT` |
+| Letters | `A`-`Z` |
+| Numbers | `0`-`9` |
+| Function | `F1`-`F12` |
+
+### Response
+
+```json
+{
+  "runId": "abc123",
+  "stepId": "def456",
+  "ok": true,
+  "data": {
+    "success": true
+  }
+}
+```
+
+### Errors
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `BAD_REQUEST` | Invalid JSON, missing required fields, or unknown key/kind |
+| 409 | `LOCKED` | Workstation is locked |
+| 412 | `UAC_REQUIRED` | Input blocked by UAC/secure desktop |
+| 500 | `INPUT_FAILED` | SendInput failed |
+| 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
+
+### Examples
+
+#### Press Ctrl+L (focus address bar in browser)
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","L"]}'
+```
+
+#### Press Ctrl+C (copy)
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","C"]}'
+```
+
+#### Press Ctrl+Shift+Esc (open Task Manager)
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","SHIFT","ESC"]}'
+```
+
+#### Press Enter
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["ENTER"]}'
+```
+
+#### Press F5 (refresh)
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["F5"]}'
+```
+
+#### Press with humanization
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","V"],"humanize":{"delayMs":[10,30]}}'
+```
+
 ## POST /macro/*
 Refused with `409 LOCKED` when the workstation is locked.
 

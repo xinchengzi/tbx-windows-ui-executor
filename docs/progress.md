@@ -119,3 +119,92 @@ curl -X POST http://100.115.92.6:17890/input/mouse \
 8) Multi-monitor test (if available):
    - Use `GET /env` to find secondary monitor coordinates
    - Click on secondary monitor using its physical pixel coordinates
+
+---
+
+## 2026-02-05 (Update 3)
+
+### Completed
+- Implemented `POST /input/key` endpoint with keyboard input support:
+  - **Operation**: `press` (key down in order, key up in reverse order for chord behavior)
+  - **Supported keys**: CTRL, ALT, SHIFT, WIN, ENTER, ESC, TAB, BACKSPACE, DELETE, HOME, END, PAGEUP, PAGEDOWN, UP, DOWN, LEFT, RIGHT, A-Z, 0-9, F1-F12, SPACE
+  - **SendInput**: Uses `KEYBDINPUT` with virtual key codes
+  - **Humanization**: Optional `delayMs` for random delays between key events
+  - **Error handling**: Returns 412 `UAC_REQUIRED` when blocked by secure desktop
+- Updated API documentation with full `/input/key` specification and curl examples
+
+### How to test (POST /input/key)
+
+1) Start the tray app on Windows 11.
+
+2) Press Ctrl+L (focus address bar in browser):
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","L"]}'
+```
+
+3) Press Ctrl+C (copy):
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","C"]}'
+```
+
+4) Press Ctrl+V (paste):
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","V"]}'
+```
+
+5) Press Enter:
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["ENTER"]}'
+```
+
+6) Press F5 (refresh):
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["F5"]}'
+```
+
+7) Press Ctrl+Shift+Esc (open Task Manager):
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","SHIFT","ESC"]}'
+```
+
+8) Press with humanization (random delays):
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","A"],"humanize":{"delayMs":[10,30]}}'
+```
+
+9) Test locked workstation (Win+L, then try any key input):
+   - Expected: 409 LOCKED response
+
+10) Test unknown key:
+```bash
+curl -X POST http://100.115.92.6:17890/input/key \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["UNKNOWN"]}'
+```
+   - Expected: 400 BAD_REQUEST with "unknown key 'UNKNOWN'"
+
+### Next
+- Consider adding `type` kind for typing text strings.
+- Consider adding `hold` and `release` kinds for advanced scenarios.
