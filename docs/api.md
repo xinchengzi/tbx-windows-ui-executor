@@ -382,7 +382,9 @@ Captures screen, window, or region. Returns PNG or JPEG image with metadata.
     "windowRectPx": { "x": 100, "y": 100, "w": 800, "h": 600 },
     "ts": 1707123456789,
     "scale": 1.75,
-    "dpi": 168
+    "dpi": 168,
+    "displayIndex": 0,
+    "deviceName": "\\\\.\\DISPLAY1"
   }
 }
 ```
@@ -398,6 +400,8 @@ Captures screen, window, or region. Returns PNG or JPEG image with metadata.
 | `ts` | long | Unix timestamp in milliseconds |
 | `scale` | double | Display scale factor for the monitor containing the capture rect center (e.g., 1.75 for 175% scaling). |
 | `dpi` | int | Display DPI for the monitor containing the capture rect center (typically 96 * scale). |
+| `displayIndex` | int? | Index of the display used for scale/dpi derivation (from `GET /env`). Null if unknown. |
+| `deviceName` | string? | Device name of the display (e.g., `"\\\\.\\DISPLAY1"`). Null if unknown. |
 
 ### DPI Notes
 
@@ -450,7 +454,9 @@ Quick self-check to verify capture functionality is working.
     "testImageSize": 1234567,
     "testRegionPx": { "w": 1920, "h": 1080 },
     "scale": 1.75,
-    "dpi": 168
+    "dpi": 168,
+    "displayIndex": 0,
+    "deviceName": "\\\\.\\DISPLAY1"
   }
 }
 ```

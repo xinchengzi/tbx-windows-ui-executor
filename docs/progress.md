@@ -17,12 +17,19 @@
 - Refuse input/macro when workstation is locked.
 - No elevation; don’t touch UAC secure desktop.
 
-### Completed (baseline)
-- Implemented `GET /env` to return per-monitor bounds + DPI/scale (Windows only)
-- Updated `/capture` + `/capture/selfcheck` metadata so `scale`/`dpi` match the captured monitor
-- `mode=screen` captures a single monitor (primary by default) and supports `displayIndex`
+### Current repo state
+- `main` @ `8035e4e` (2026-02-05): capture endpoint + tailnet binding helper + config endpoint.
 
-### How to test (baseline)
+### Completed
+- Implemented `GET /env` to return per-monitor bounds + DPI/scale (Windows only):
+  - Added `virtualScreenRectPx`
+  - Per display: `boundsRectPx`, `workAreaRectPx`, and `dpi/scale` objects
+- Updated `/capture` + `/capture/selfcheck` metadata so `scale`/`dpi` match the captured monitor:
+  - window/region: monitor containing capture rect center
+  - screen: respects `displayIndex` (else primary)
+- `mode=screen` now captures a single monitor (primary by default) instead of the entire virtual desktop.
+
+### How to test (2026-02-05)
 1) On Windows 11 with 2 monitors at different scaling (e.g., 100% and 175%):
    - Start the tray app.
    - Call `GET /env` and note `displays[i].scale.x` / `displays[i].dpi.x`.
@@ -40,26 +47,58 @@
    - Verify `scale/dpi` match the monitor containing that region center.
 
 ### Notes / Risks
+- DPI correctness is the foundation; do it before input.
 - Multi-monitor DPI can differ.
 - Per-monitor DPI uses `GetDpiForMonitor(MDT_EFFECTIVE_DPI)` (Win 8.1+). Fallback may return system DPI depending on process DPI awareness.
 
-### Next (after baseline)
-- Enforce/verify Per-Monitor DPI awareness at process startup.
-- M2 input endpoints (`/input/mouse`, `/input/key`).
+### Next
+- Validate per-monitor DPI awareness is enabled at process startup.
+- M2 input endpoints (`/input/key`).
 
 ---
 
-## 2026-02-05 (Update 2) — /input/mouse
+## 2026-02-05 (Update 3)
 
 ### Completed
-- Implemented `POST /input/mouse` endpoint:
-  - Operations: `move`, `click`, `double`, `right`, `wheel`, `drag`
-  - Coordinate system: physical pixels in virtual screen space (negative origins supported)
-  - SendInput flags: `MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK`
-  - Optional humanization: `jitterPx`, `delayMs`
-  - 412 `UAC_REQUIRED` when blocked by secure desktop
+- Enhanced `/capture` and `/capture/selfcheck` responses to include display identity:
+  - Added optional `displayIndex` and `deviceName` fields to capture metadata
+  - `displayIndex`: Index of the display used for scale/dpi derivation (matches `GET /env`)
+  - `deviceName`: Device name of the display (e.g., `"\\\\.\\DISPLAY1"`)
+  - For `mode=screen`: reports the selected display (by `displayIndex` or primary)
+  - For `mode=window`/`mode=region`: reports the display containing the capture rect center
+- Updated API documentation with new response fields
 
-### How to test
+### How to test (display identity in capture)
+1) Call `GET /env` and note display indices and device names.
+2) Screen capture primary:
+   - `POST /capture` with `{ "mode": "screen" }`
+   - Verify `data.displayIndex` and `data.deviceName` match the primary display from `/env`.
+3) Screen capture by index:
+   - `POST /capture` with `{ "mode": "screen", "displayIndex": 1 }`
+   - Verify `data.displayIndex === 1` and `data.deviceName` matches `/env.displays[1].deviceName`.
+4) Region capture:
+   - Choose a region on each monitor and verify `displayIndex`/`deviceName` match.
+5) `/capture/selfcheck`:
+   - Verify response includes `displayIndex` and `deviceName` for the primary display.
+
+---
+
+## 2026-02-05 (Update 2)
+
+### Completed
+- Implemented `POST /input/mouse` endpoint with full mouse input support:
+  - **Operations**: `move`, `click`, `double`, `right`, `wheel`, `drag`
+  - **Coordinate system**: Physical pixels in virtual screen space (handles negative origins)
+  - **SendInput**: Uses `MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK` for cross-monitor support
+  - **Humanization**: Optional `jitterPx` and `delayMs` for human-like input
+  - **Error handling**: Returns 412 `UAC_REQUIRED` when blocked by secure desktop
+- Updated API documentation with full `/input/mouse` specification and curl examples
+
+### How to test (POST /input/mouse)
+
+1) Start the tray app on Windows 11.
+
+2) Move cursor:
 ```bash
 curl -X POST http://100.115.92.6:17890/input/mouse \
   -H "Authorization: Bearer $TOKEN" \
@@ -67,57 +106,41 @@ curl -X POST http://100.115.92.6:17890/input/mouse \
   -d '{"kind":"move","x":500,"y":300}'
 ```
 
-Locked test:
-- Win+L then call any `/input/*` → expect 409 `LOCKED`
-
-Multi-monitor test:
-- Use `GET /env` to find secondary monitor coordinates
-- Click on secondary monitor using its physical pixel coordinates
-
----
-
-## 2026-02-05 (Update 3) — /input/key
-
-### Completed
-- Implemented `POST /input/key` endpoint (`kind=press`):
-  - Key down in given order; key up in reverse order
-  - Supported keys: CTRL, ALT, SHIFT, WIN, ENTER, ESC, TAB, BACKSPACE, DELETE, HOME, END, PAGEUP, PAGEDOWN, UP/DOWN/LEFT/RIGHT, A-Z, 0-9, F1-F12, SPACE
-  - Optional humanization: `delayMs` between events
-  - 412 `UAC_REQUIRED` when blocked by secure desktop
-
-### How to test
+3) Left click (open Start menu area):
 ```bash
-# Ctrl+L
-curl -X POST http://100.115.92.6:17890/input/key \
+curl -X POST http://100.115.92.6:17890/input/mouse \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"press","keys":["CTRL","L"]}'
+  -d '{"kind":"click","x":50,"y":1050}'
+```
 
-# Ctrl+Shift+Esc
-curl -X POST http://100.115.92.6:17890/input/key \
+4) Right click (context menu):
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"press","keys":["CTRL","SHIFT","ESC"]}'
+  -d '{"kind":"right","x":500,"y":500}'
 ```
 
----
-
-## 2026-02-05 (Update 4) — DPI awareness enforcement
-
-### Completed
-- Enforced **Per-Monitor DPI Aware V2** via `app.manifest` (with fallbacks)
-- Added DPI awareness self-check in `GET /env`:
-  - New field `dpiAwareness` (e.g., `"PerMonitorV2"`)
-
-### How to verify DPI awareness
+5) Scroll wheel:
 ```bash
-curl -s http://100.115.92.6:17890/env \
-  -H "Authorization: Bearer $TOKEN" | jq '.data.dpiAwareness'
-# expected: "PerMonitorV2"
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"wheel","x":500,"y":500,"dy":-360}'
 ```
 
----
+6) Drag (draw selection box on desktop):
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"drag","x":100,"y":100,"x2":400,"y2":400}'
+```
 
-## Next
-- (Optional) Include display identity in capture response (`displayIndex/deviceName`) for easier debugging.
-- M3: macros + evidence bundles.
+7) Test locked workstation (Win+L, then try any input):
+   - Expected: 409 LOCKED response
+
+8) Multi-monitor test (if available):
+   - Use `GET /env` to find secondary monitor coordinates
+   - Click on secondary monitor using its physical pixel coordinates
