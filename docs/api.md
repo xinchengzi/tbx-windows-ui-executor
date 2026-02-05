@@ -471,3 +471,128 @@ On non-Windows or if capture fails:
   }
 }
 ```
+
+## POST /macro/run
+
+Executes a sequence of steps (macro) atomically. Each step is logged to the evidence bundle.
+
+### Request
+
+```json
+{
+  "steps": [
+    {
+      "type": "capture",
+      "capture": {
+        "mode": "screen",
+        "format": "png"
+      }
+    },
+    {
+      "type": "mouse",
+      "mouse": {
+        "kind": "click",
+        "x": 500,
+        "y": 300
+      }
+    },
+    {
+      "type": "key",
+      "key": {
+        "kind": "press",
+        "keys": ["CTRL", "C"]
+      }
+    },
+    {
+      "type": "delay",
+      "delayMs": 100,
+      "onFailure": "stop"
+    }
+  ]
+}
+```
+
+### Step Types
+
+| Type | Description |
+|------|-------------|
+| `capture` | Takes a screenshot. Image saved to `screenshots/` folder, not returned as base64 in logs. |
+| `mouse` | Performs mouse input (move, click, drag, wheel, etc.) |
+| `key` | Performs keyboard input |
+| `delay` | Waits for specified milliseconds |
+
+### Step Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | **Yes** | `capture`, `mouse`, `key`, or `delay` |
+| `capture` | object | When type=capture | Capture options (same as `/capture` request) |
+| `mouse` | object | When type=mouse | Mouse input options (same as `/input/mouse` request) |
+| `key` | object | When type=key | Key input options (same as `/input/key` request) |
+| `delayMs` | int | When type=delay | Milliseconds to wait |
+| `onFailure` | string | No | `stop` (default) or `continue`. If `stop`, macro halts on step failure. |
+
+### Response
+
+```json
+{
+  "runId": "abc123def456",
+  "ok": true,
+  "steps": [
+    {
+      "stepId": "step001",
+      "type": "capture",
+      "ok": true,
+      "durationMs": 150,
+      "response": {
+        "screenshotPath": "screenshots/step_step001.png",
+        "format": "png",
+        "regionRectPx": { "x": 0, "y": 0, "w": 1920, "h": 1080 },
+        "ts": 1707123456789,
+        "scale": 1.75,
+        "dpi": 168
+      },
+      "screenshotPath": "screenshots/step_step001.png"
+    },
+    {
+      "stepId": "step002",
+      "type": "mouse",
+      "ok": true,
+      "durationMs": 50,
+      "response": { "success": true }
+    }
+  ]
+}
+```
+
+### Evidence Bundle Logging
+
+- All steps are automatically logged to `%APPDATA%/TbxExecutor/runs/<runId>/steps.jsonl`
+- Screenshots are saved to `screenshots/step_<stepId>.png` (or `.jpg`)
+- **imageB64 is NOT logged** - only the file reference path is stored
+- **Bearer tokens are NEVER logged**
+
+### Errors
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `BAD_REQUEST` | Invalid JSON or missing required fields |
+| 409 | `LOCKED` | Workstation is locked |
+| 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
+
+### Example
+
+```bash
+curl -X POST http://100.115.92.6:17890/macro/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "X-Run-Id: my-test-run-001" \
+  -d '{
+    "steps": [
+      {"type": "capture", "capture": {"mode": "screen"}},
+      {"type": "mouse", "mouse": {"kind": "click", "x": 500, "y": 300}},
+      {"type": "delay", "delayMs": 100},
+      {"type": "capture", "capture": {"mode": "screen"}}
+    ]
+  }'
+```
