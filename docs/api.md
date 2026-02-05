@@ -8,6 +8,9 @@ All requests require:
 - Remote IP must be allowlisted (default: `100.64.0.1`)
 - Recommended: bind to a tailnet IP and keep the allowlist enabled.
 
+See also:
+- `docs/acceptance.md` — acceptance checklist for DPI correctness and (future) monitor selection
+
 ## GET /health
 Returns basic status.
 Includes `locked` when the workstation is locked.
