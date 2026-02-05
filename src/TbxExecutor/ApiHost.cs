@@ -102,6 +102,31 @@ public sealed class ApiHost : IDisposable
         var windowManager = OperatingSystem.IsWindows()
             ? new WindowsWindowManager()
             : new NullWindowManager();
+        var lockStateProvider = OperatingSystem.IsWindows()
+            ? new WindowsLockStateProvider()
+            : new NullLockStateProvider();
+
+        // Middleware: lock state guard
+        app.Use(async (ctx, next) =>
+        {
+            if (!lockStateProvider.IsLocked())
+            {
+                await next();
+                return;
+            }
+
+            var path = ctx.Request.Path;
+            if (path.StartsWithSegments("/window/focus")
+                || path.StartsWithSegments("/input")
+                || path.StartsWithSegments("/macro"))
+            {
+                await Results.Json(ApiResponse.Error(ctx, 409, "LOCKED"))
+                    .ExecuteAsync(ctx);
+                return;
+            }
+
+            await next();
+        });
 
         // Routes
         app.MapGet("/health", (HttpContext ctx) =>
@@ -110,7 +135,7 @@ public sealed class ApiHost : IDisposable
             {
                 version = "0.1.0",
                 uptimeMs = (long)(Environment.TickCount64),
-                locked = false, // placeholder
+                locked = lockStateProvider.IsLocked(),
                 paused = false,
             };
             return Results.Json(ApiResponse.Ok(ctx, payload));
@@ -136,8 +161,29 @@ public sealed class ApiHost : IDisposable
 
         app.MapPost("/window/focus", async (HttpContext ctx) =>
         {
-            _ = await ctx.Request.ReadFromJsonAsync<WindowFocusRequest>();
-            return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            }
+
+            var payload = await ctx.Request.ReadFromJsonAsync<WindowFocusRequest>();
+            if (payload?.Match is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_MATCH"));
+            }
+
+            if (!WindowMatchValidator.IsValidRegex(payload.Match.TitleRegex))
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REGEX"));
+            }
+
+            var focused = windowManager.FocusWindow(payload.Match);
+            if (focused is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 404, "WINDOW_NOT_FOUND"));
+            }
+
+            return Results.Json(ApiResponse.Ok(ctx, focused));
         });
 
         app.MapPost("/capture", (HttpContext ctx) =>

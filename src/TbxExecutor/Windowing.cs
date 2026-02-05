@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 
 namespace TbxExecutor;
@@ -18,6 +19,23 @@ public sealed record WindowInfo(
 public sealed record WindowMatch(string? TitleContains, string? TitleRegex, string? ProcessName);
 
 public sealed record WindowFocusRequest(WindowMatch? Match);
+
+public static class WindowMatchValidator
+{
+    public static bool IsValidRegex(string? pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return true;
+        try
+        {
+            _ = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+}
 
 public interface IWindowManager
 {
@@ -74,7 +92,65 @@ public sealed class WindowsWindowManager : IWindowManager
 
     public WindowInfo? FocusWindow(WindowMatch match)
     {
-        return null;
+        var windows = ListWindows();
+        if (windows.Count == 0) return null;
+
+        Regex? titleRegex = null;
+        if (!string.IsNullOrWhiteSpace(match.TitleRegex))
+        {
+            try
+            {
+                titleRegex = new Regex(
+                    match.TitleRegex,
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+
+        WindowInfo? best = null;
+        foreach (var window in windows)
+        {
+            if (!Matches(window, match, titleRegex)) continue;
+            if (window.IsVisible && !window.IsMinimized)
+            {
+                best = window;
+                break;
+            }
+
+            best ??= window;
+        }
+
+        if (best is null) return null;
+
+        var hwnd = new IntPtr(best.Hwnd);
+        ShowWindow(hwnd, ShowCmdRestore);
+        if (!SetForegroundWindow(hwnd))
+        {
+            if (TryAttachForeground(hwnd, out var foregroundThread, out var targetThread, out var currentThread))
+            {
+                try
+                {
+                    _ = SetForegroundWindow(hwnd);
+                }
+                finally
+                {
+                    if (foregroundThread != 0)
+                    {
+                        _ = AttachThreadInput(foregroundThread, currentThread, false);
+                    }
+
+                    if (targetThread != 0)
+                    {
+                        _ = AttachThreadInput(targetThread, currentThread, false);
+                    }
+                }
+            }
+        }
+
+        return best;
     }
 
     private static string GetWindowTitle(IntPtr hwnd)
@@ -109,6 +185,63 @@ public sealed class WindowsWindowManager : IWindowManager
         return placement.showCmd == ShowCmdMinimized;
     }
 
+    private static bool Matches(WindowInfo window, WindowMatch match, Regex? titleRegex)
+    {
+        if (!string.IsNullOrWhiteSpace(match.TitleContains))
+        {
+            if (window.Title is null || window.Title.IndexOf(
+                    match.TitleContains,
+                    StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return false;
+            }
+        }
+
+        if (titleRegex is not null && !titleRegex.IsMatch(window.Title ?? string.Empty))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(match.ProcessName))
+        {
+            if (!string.Equals(
+                    window.ProcessName,
+                    match.ProcessName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryAttachForeground(
+        IntPtr hwnd,
+        out uint foregroundThread,
+        out uint targetThread,
+        out uint currentThread)
+    {
+        var foreground = GetForegroundWindow();
+        foregroundThread = foreground == IntPtr.Zero
+            ? 0
+            : GetWindowThreadProcessId(foreground, out _);
+        targetThread = GetWindowThreadProcessId(hwnd, out _);
+        currentThread = GetCurrentThreadId();
+
+        if (foregroundThread != 0)
+        {
+            _ = AttachThreadInput(foregroundThread, currentThread, true);
+        }
+
+        if (targetThread != 0)
+        {
+            _ = AttachThreadInput(targetThread, currentThread, true);
+        }
+
+        return foregroundThread != 0 || targetThread != 0;
+    }
+
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -132,7 +265,23 @@ public sealed class WindowsWindowManager : IWindowManager
     [DllImport("user32.dll")]
     private static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
 
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
     private const int ShowCmdMinimized = 2;
+    private const int ShowCmdRestore = 9;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
