@@ -1,7 +1,32 @@
 # Progress Log
 
 > Keep this as the single source of truth for development progress.
-> Every entry should include: what changed, how to test, and what’s next.
+> Every entry should include: what changed, how to test, and what's next.
+
+## 2026-02-05 (Update 4)
+
+### Completed
+- Implemented single-run concurrency guard:
+  - Added `RunGuard.cs` - global async semaphore (SemaphoreSlim 1,1)
+  - Only one macro or input sequence can run at a time
+  - Applied to `/macro/run` and `/input/*` endpoints
+  - Returns `429 BUSY` when another run is in progress
+- Implemented `POST /macro/run` endpoint:
+  - Executes a sequence of input steps (mouse/keyboard)
+  - Supports `delayMs` between steps
+  - Each step can include mouse and/or key input
+
+### How to test (concurrency guard)
+1) Start two concurrent requests to `/input/mouse` or `/macro/run`
+2) First request should succeed, second should receive `429 BUSY`
+3) After first request completes, subsequent requests should succeed
+
+### Affected endpoints
+- `POST /macro/run` - new endpoint
+- `POST /input/mouse` - now returns 429 when busy
+- `POST /input/key` - now returns 429 when busy
+
+---
 
 ## 2026-02-05
 

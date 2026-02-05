@@ -68,6 +68,7 @@ When the workstation is locked, returns `409 LOCKED`.
 
 ## POST /input/*
 Refused with `409 LOCKED` when the workstation is locked.
+Refused with `429 BUSY` when another macro or input sequence is running.
 
 ## POST /input/mouse
 
@@ -139,6 +140,7 @@ Performs mouse input operations using SendInput. Coordinates are physical pixels
 | 400 | `BAD_REQUEST` | Invalid JSON, missing required fields, or unknown kind |
 | 409 | `LOCKED` | Workstation is locked |
 | 412 | `UAC_REQUIRED` | Input blocked by UAC/secure desktop |
+| 429 | `BUSY` | Another macro or input sequence is running |
 | 500 | `INPUT_FAILED` | SendInput failed |
 | 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
 
@@ -268,6 +270,7 @@ Performs keyboard input operations using SendInput.
 | 400 | `BAD_REQUEST` | Invalid JSON, missing required fields, or unknown key/kind |
 | 409 | `LOCKED` | Workstation is locked |
 | 412 | `UAC_REQUIRED` | Input blocked by UAC/secure desktop |
+| 429 | `BUSY` | Another macro or input sequence is running |
 | 500 | `INPUT_FAILED` | SendInput failed |
 | 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
 
@@ -323,6 +326,65 @@ curl -X POST http://100.115.92.6:17890/input/key \
 
 ## POST /macro/*
 Refused with `409 LOCKED` when the workstation is locked.
+Refused with `429 BUSY` when another macro or input sequence is running.
+
+## POST /macro/run
+
+Executes a sequence of input steps (mouse/keyboard) as a macro. Only one macro or input sequence can run at a time.
+
+### Request
+
+```json
+{
+  "steps": [
+    { "delayMs": 100, "mouse": { "kind": "click", "x": 500, "y": 300 } },
+    { "delayMs": 50, "key": { "kind": "press", "keys": ["CTRL", "V"] } }
+  ]
+}
+```
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `steps` | array | **Yes** | Array of macro steps to execute |
+| `steps[].delayMs` | int | No | Delay in milliseconds before executing this step (default: 0) |
+| `steps[].mouse` | object | No | Mouse input request (same format as `/input/mouse`) |
+| `steps[].key` | object | No | Key input request (same format as `/input/key`) |
+
+### Response
+
+```json
+{
+  "runId": "abc123",
+  "stepId": "def456",
+  "ok": true,
+  "data": {
+    "success": true,
+    "stepsExecuted": 2
+  }
+}
+```
+
+### Errors
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `BAD_REQUEST` | Invalid JSON or missing/empty steps array |
+| 409 | `LOCKED` | Workstation is locked |
+| 429 | `BUSY` | Another macro or input sequence is running |
+| 500 | `MOUSE_FAILED` / `KEY_FAILED` | Input step failed |
+| 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
+
+### Examples
+
+#### Execute click then paste
+```bash
+curl -X POST http://100.115.92.6:17890/macro/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"steps":[{"delayMs":0,"mouse":{"kind":"click","x":500,"y":300}},{"delayMs":100,"key":{"kind":"press","keys":["CTRL","V"]}}]}'
+```
 
 ## POST /capture
 
