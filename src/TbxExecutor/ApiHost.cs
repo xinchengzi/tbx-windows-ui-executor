@@ -99,6 +99,10 @@ public sealed class ApiHost : IDisposable
             await next();
         });
 
+        var windowManager = OperatingSystem.IsWindows()
+            ? new WindowsWindowManager()
+            : new NullWindowManager();
+
         // Routes
         app.MapGet("/health", (HttpContext ctx) =>
         {
@@ -126,11 +130,13 @@ public sealed class ApiHost : IDisposable
 
         app.MapPost("/window/list", (HttpContext ctx) =>
         {
-            return Results.Json(ApiResponse.Ok(ctx, Array.Empty<object>()));
+            var windows = windowManager.ListWindows();
+            return Results.Json(ApiResponse.Ok(ctx, windows));
         });
 
-        app.MapPost("/window/focus", (HttpContext ctx) =>
+        app.MapPost("/window/focus", async (HttpContext ctx) =>
         {
+            _ = await ctx.Request.ReadFromJsonAsync<WindowFocusRequest>();
             return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
         });
 

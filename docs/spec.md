@@ -78,6 +78,11 @@
 ### 3.3 验收用例
 - 在 100%/125%/175% 缩放下，点选测试点（如屏幕四角+中心），点击坐标与截图标注完全一致（误差<=1~2px）。
 
+### 3.4 DPI 物理像素单元测试（文档版）
+- Test: capture full screen at 175% scale, record image size WxH; Expect: image pixel size equals reported display resolution in physical pixels.
+- Test: pick screen center (x = W/2, y = H/2), click via input; Expect: cursor ends at exact center in captured image (error <= 2px).
+- Test: capture window, compare returned windowRectPx to actual window size measured by moving the window to (0,0); Expect: rect width/height match captured window pixel size.
+
 ---
 
 ## 4. 锁屏与 UAC 拦截
@@ -225,4 +230,3 @@ Controller（服务器 OpenClaw agent）调用 Executor：
 - listenPort：`17890`
 - allowlistIps：`["100.64.0.1"]`
 - image 默认：PNG（区域截图可用 JPEG 省带宽）
-

@@ -14,9 +14,10 @@ Returns basic status.
 Returns environment metadata (display/DPI placeholders for now).
 
 ## POST /window/list
-Returns `[]` (stub).
+Returns window list on Windows; returns `[]` on non-Windows.
 
 ## POST /window/focus
+Accepts `{ "match": { "titleContains"?, "titleRegex"?, "processName"? } }`.
 Returns 501 Not Implemented.
 
 ## POST /capture
