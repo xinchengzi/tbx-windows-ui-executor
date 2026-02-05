@@ -117,6 +117,12 @@ public sealed class ApiHost : IDisposable
             ? new WindowsKeyInputProvider()
             : new NullKeyInputProvider();
 
+        var macroRunner = new MacroRunner(
+            windowManager,
+            captureProvider,
+            mouseInputProvider,
+            keyInputProvider);
+
         // Middleware: lock state guard
         app.Use(async (ctx, next) =>
         {
@@ -420,6 +426,52 @@ public sealed class ApiHost : IDisposable
             }
 
             return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
+        });
+
+        app.MapPost("/macro/run", async (HttpContext ctx) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            }
+
+            MacroRunRequest? payload;
+            try
+            {
+                payload = await ctx.Request.ReadFromJsonAsync<MacroRunRequest>();
+            }
+            catch
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            if (payload is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            var runId = (string?)ctx.Items["runId"] ?? Guid.NewGuid().ToString("n");
+            var result = macroRunner.Execute(payload, runId);
+
+            if (!result.Ok)
+            {
+                var statusCode = result.Status ?? 500;
+                return Results.Json(new
+                {
+                    runId = result.RunId,
+                    ok = false,
+                    status = statusCode,
+                    error = result.Error,
+                    steps = result.Steps
+                });
+            }
+
+            return Results.Json(new
+            {
+                runId = result.RunId,
+                ok = true,
+                steps = result.Steps
+            });
         });
 
         _app = app;

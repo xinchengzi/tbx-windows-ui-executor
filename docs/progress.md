@@ -1,7 +1,74 @@
 # Progress Log
 
 > Keep this as the single source of truth for development progress.
-> Every entry should include: what changed, how to test, and what’s next.
+> Every entry should include: what changed, how to test, and what's next.
+
+## 2026-02-05 (Update 4)
+
+### Completed
+- Implemented `POST /macro/run` endpoint for batch macro execution:
+  - **Step types**: `window.focus`, `capture`, `input.mouse`, `input.key`, `sleep`
+  - **Sequential execution**: Steps run in order with individual results
+  - **Fail-fast mode**: Optional early termination on first failure (default: true)
+  - **Humanization defaults**: Apply `delayMs`/`jitterPx` to all steps via `defaults.humanize`
+  - **Run ID**: Uses `X-Run-Id` header if present, otherwise generates new ID
+  - **UAC handling**: Returns 412 `UAC_REQUIRED` if blocked by secure desktop
+  - **Capture schema**: `capture` step returns same schema as `/capture` endpoint
+- Created `MacroRunner.cs` with step execution logic reusing existing providers
+- Updated API documentation with full `/macro/run` specification
+
+### How to test (POST /macro/run)
+
+1) Focus window and capture:
+```bash
+curl -X POST http://100.115.92.6:17890/macro/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"window.focus", "match": {"processName":"notepad"}},
+      {"kind":"sleep", "ms": 100},
+      {"kind":"capture", "mode":"window", "window": {"processName":"notepad"}}
+    ]
+  }'
+```
+
+2) Mouse click and keyboard input:
+```bash
+curl -X POST http://100.115.92.6:17890/macro/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"input.mouse", "x": 500, "y": 300},
+      {"kind":"input.key", "keys": ["CTRL", "A"]}
+    ],
+    "defaults": {"humanize": {"delayMs": [10, 50], "jitterPx": 1}}
+  }'
+```
+
+3) Test fail-fast behavior:
+```bash
+curl -X POST http://100.115.92.6:17890/macro/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"window.focus", "match": {"titleContains":"NonExistentWindow"}},
+      {"kind":"capture", "mode":"screen"}
+    ],
+    "failFast": true
+  }'
+# Expected: First step fails with WINDOW_NOT_FOUND, second step not executed
+```
+
+4) Test locked workstation (Win+L, then try any macro):
+   - Expected: 409 LOCKED response
+
+5) Test UAC blocking (trigger UAC prompt, then try input macro):
+   - Expected: 412 UAC_REQUIRED in step result
+
+---
 
 ## 2026-02-05
 

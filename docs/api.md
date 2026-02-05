@@ -324,6 +324,124 @@ curl -X POST http://100.115.92.6:17890/input/key \
 ## POST /macro/*
 Refused with `409 LOCKED` when the workstation is locked.
 
+## POST /macro/run
+
+Executes a sequence of macro steps atomically. Windows only.
+
+### Request
+
+```json
+{
+  "steps": [
+    {"kind":"window.focus", "match": {"titleContains":"Notepad"}},
+    {"kind":"capture", "mode":"window", "window": {"processName":"notepad"}},
+    {"kind":"input.mouse", "x": 500, "y": 300},
+    {"kind":"input.key", "keys": ["CTRL", "S"]},
+    {"kind":"sleep", "ms": 100}
+  ],
+  "defaults": {
+    "humanize": {"delayMs": [10, 50], "jitterPx": 1}
+  },
+  "failFast": true
+}
+```
+
+### Step Kinds
+
+| Kind | Description | Required Fields |
+|------|-------------|-----------------|
+| `window.focus` | Focus a window | `match` (same as `/window/focus`) |
+| `capture` | Capture screen/window/region | Same fields as `/capture` |
+| `input.mouse` | Mouse input (defaults to click) | Same as `/input/mouse`. Use `input.mouse.move`, `input.mouse.click`, etc. for explicit action. |
+| `input.key` | Keyboard input | Same as `/input/key`. Use `input.key.press` for explicit action. |
+| `sleep` | Delay execution | `ms` (milliseconds) |
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `steps` | array | **Yes** | Array of step objects to execute |
+| `defaults` | object | No | Default settings applied to all steps |
+| `defaults.humanize` | object | No | Default humanization settings |
+| `defaults.humanize.delayMs` | [int, int] | No | Random delay range [min, max] in milliseconds |
+| `defaults.humanize.jitterPx` | int | No | Random pixel offset for mouse operations |
+| `failFast` | bool | No | Stop at first failure (default: true) |
+
+### Response
+
+```json
+{
+  "runId": "abc123def456",
+  "ok": true,
+  "steps": [
+    {"stepId": "step1", "ok": true, "data": {...}},
+    {"stepId": "step2", "ok": true, "data": {...}},
+    {"stepId": "step3", "ok": false, "status": 412, "error": "UAC_REQUIRED"}
+  ]
+}
+```
+
+### Step Result Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stepId` | string | Unique identifier for this step |
+| `ok` | bool | Whether the step succeeded |
+| `status` | int? | HTTP status code on failure |
+| `error` | string? | Error code on failure |
+| `data` | object? | Step-specific result data on success |
+
+### Behavior
+
+- Steps execute sequentially in order.
+- Each step returns its own result with a unique `stepId`.
+- If `failFast` is true (default), execution stops at the first failure.
+- Uses `X-Run-Id` header if provided, otherwise generates a new runId.
+- The `capture` step returns the same schema as `/capture`.
+- Humanization from `defaults.humanize` is applied unless overridden per-step.
+
+### Errors
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `BAD_REQUEST` | Invalid JSON, missing required fields, or unknown step kind |
+| 404 | `WINDOW_NOT_FOUND` | Window focus step: no matching window |
+| 404 | `CAPTURE_FAILED` | Capture step: target not found or capture failed |
+| 409 | `LOCKED` | Workstation is locked |
+| 412 | `UAC_REQUIRED` | Input blocked by UAC/secure desktop |
+| 500 | `INPUT_FAILED` | SendInput failed |
+| 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
+
+### Examples
+
+#### Focus window and capture
+```bash
+curl -X POST http://100.115.92.6:17890/macro/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"window.focus", "match": {"processName":"notepad"}},
+      {"kind":"sleep", "ms": 100},
+      {"kind":"capture", "mode":"window", "window": {"processName":"notepad"}}
+    ]
+  }'
+```
+
+#### Click and type with humanization
+```bash
+curl -X POST http://100.115.92.6:17890/macro/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"input.mouse", "x": 500, "y": 300},
+      {"kind":"input.key", "keys": ["H", "E", "L", "L", "O"]}
+    ],
+    "defaults": {"humanize": {"delayMs": [20, 80], "jitterPx": 2}}
+  }'
+```
+
 ## POST /capture
 
 Captures screen, window, or region. Returns PNG or JPEG image with metadata.
