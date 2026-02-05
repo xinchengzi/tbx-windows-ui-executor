@@ -679,20 +679,3 @@ public sealed record CaptureWindowMatch(
 
 public sealed record CaptureRegion(int X, int Y, int W, int H);
 
-public sealed record MacroRunRequest(MacroStep[]? Steps);
-
-public sealed record MacroStep(
-    string? Type,
-    MacroCaptureRequest? Capture,
-    MouseInputRequest? Mouse,
-    KeyInputRequest? Key,
-    int? DelayMs,
-    string? OnFailure);
-
-public sealed record MacroCaptureRequest(
-    string? Mode,
-    CaptureWindowMatch? Window,
-    CaptureRegion? Region,
-    string? Format,
-    int? Quality,
-    int? DisplayIndex);
