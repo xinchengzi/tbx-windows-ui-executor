@@ -3,7 +3,12 @@ name: build-windows
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'feat/**'
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
@@ -28,5 +33,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tbx-executor-portable
+          name: tbx-executor-portable-${{ github.run_number }}
           path: .\src\TbxExecutor\bin\Release\net8.0-windows\publish\
