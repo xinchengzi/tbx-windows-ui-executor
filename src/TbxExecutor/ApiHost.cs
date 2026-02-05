@@ -113,6 +113,9 @@ public sealed class ApiHost : IDisposable
         var mouseInputProvider = OperatingSystem.IsWindows()
             ? new WindowsMouseInputProvider()
             : new NullMouseInputProvider();
+        var keyInputProvider = OperatingSystem.IsWindows()
+            ? new WindowsKeyInputProvider()
+            : new NullKeyInputProvider();
 
         // Middleware: lock state guard
         app.Use(async (ctx, next) =>
@@ -373,6 +376,38 @@ public sealed class ApiHost : IDisposable
             }
 
             var result = mouseInputProvider.Execute(payload);
+            if (!result.Ok)
+            {
+                var statusCode = result.StatusCode ?? 500;
+                return Results.Json(ApiResponse.Error(ctx, statusCode, result.Error ?? "UNKNOWN_ERROR"));
+            }
+
+            return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
+        });
+
+        app.MapPost("/input/key", async (HttpContext ctx) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            }
+
+            KeyInputRequest? payload;
+            try
+            {
+                payload = await ctx.Request.ReadFromJsonAsync<KeyInputRequest>();
+            }
+            catch
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            if (payload is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            var result = keyInputProvider.Execute(payload);
             if (!result.Ok)
             {
                 var statusCode = result.StatusCode ?? 500;
