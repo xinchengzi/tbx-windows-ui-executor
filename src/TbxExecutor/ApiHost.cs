@@ -175,6 +175,7 @@ public sealed class ApiHost : IDisposable
             {
                 os = Environment.OSVersion.VersionString,
                 coordinateSystem = "physicalPixels",
+                dpiAwareness = DpiAwareness.GetCurrentModeString(),
                 virtualScreenRectPx = new { x = vs.X, y = vs.Y, w = vs.W, h = vs.H },
                 displays
             };
