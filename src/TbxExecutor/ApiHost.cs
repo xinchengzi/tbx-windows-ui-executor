@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
@@ -11,6 +13,7 @@ namespace TbxExecutor;
 public sealed class ApiHost : IDisposable
 {
     private readonly ExecutorConfig _config;
+    private readonly RunLogger _runLogger = new();
     private WebApplication? _app;
 
     public ApiHost(ExecutorConfig config)
@@ -116,12 +119,6 @@ public sealed class ApiHost : IDisposable
         var keyInputProvider = OperatingSystem.IsWindows()
             ? new WindowsKeyInputProvider()
             : new NullKeyInputProvider();
-
-        var macroRunner = new MacroRunner(
-            windowManager,
-            captureProvider,
-            mouseInputProvider,
-            keyInputProvider);
 
         // Middleware: lock state guard
         app.Use(async (ctx, next) =>
@@ -302,6 +299,17 @@ public sealed class ApiHost : IDisposable
                 return Results.Json(ApiResponse.Error(ctx, 404, "CAPTURE_FAILED"));
             }
 
+            var runId = (string?)ctx.Items["runId"];
+            var stepId = (string?)ctx.Items["stepId"];
+            var hasExplicitRunId = !string.IsNullOrEmpty(ctx.Request.Headers["X-Run-Id"].ToString());
+            string? screenshotPath = null;
+
+            if (hasExplicitRunId && runId is not null && stepId is not null)
+            {
+                var formatStr = result.Format == CaptureFormat.Png ? "png" : "jpeg";
+                screenshotPath = _runLogger.SaveScreenshot(runId, stepId, result.ImageBytes, formatStr);
+            }
+
             var responseData = new
             {
                 imageB64 = Convert.ToBase64String(result.ImageBytes),
@@ -445,32 +453,171 @@ public sealed class ApiHost : IDisposable
                 return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
             }
 
-            if (payload is null)
+            if (payload?.Steps is null || payload.Steps.Length == 0)
             {
-                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST: steps array required"));
             }
 
             var runId = (string?)ctx.Items["runId"] ?? Guid.NewGuid().ToString("n");
-            var result = macroRunner.Execute(payload, runId);
+            var stepResults = new List<object>();
+            var overallOk = true;
 
-            if (!result.Ok)
+            foreach (var step in payload.Steps)
             {
-                var statusCode = result.Status ?? 500;
-                return Results.Json(new
+                var stepId = Guid.NewGuid().ToString("n");
+                var sw = Stopwatch.StartNew();
+                var tsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                object? stepResponse = null;
+                bool stepOk = false;
+                string? stepError = null;
+                string? screenshotPath = null;
+
+                try
                 {
-                    runId = result.RunId,
-                    ok = false,
-                    status = statusCode,
-                    error = result.Error,
-                    steps = result.Steps
+                    var stepType = step.Type?.ToLowerInvariant() ?? "";
+
+                    if (stepType == "capture")
+                    {
+                        var captureReq = step.Capture ?? new MacroCaptureRequest(null, null, null, null, null, null);
+                        var mode = captureReq.Mode?.ToLowerInvariant() switch
+                        {
+                            "window" => CaptureMode.Window,
+                            "region" => CaptureMode.Region,
+                            _ => CaptureMode.Screen
+                        };
+                        var format = captureReq.Format?.ToLowerInvariant() switch
+                        {
+                            "jpeg" or "jpg" => CaptureFormat.Jpeg,
+                            _ => CaptureFormat.Png
+                        };
+                        WindowMatch? windowMatch = null;
+                        if (captureReq.Window is not null)
+                        {
+                            windowMatch = new WindowMatch(
+                                captureReq.Window.TitleContains,
+                                captureReq.Window.TitleRegex,
+                                captureReq.Window.ProcessName);
+                        }
+                        RectPx? region = null;
+                        if (captureReq.Region is not null)
+                        {
+                            region = new RectPx(captureReq.Region.X, captureReq.Region.Y, captureReq.Region.W, captureReq.Region.H);
+                        }
+
+                        var request = new CaptureRequest(mode, windowMatch, region, format, captureReq.Quality ?? 90, captureReq.DisplayIndex);
+                        var result = captureProvider.Capture(request, windowManager);
+
+                        if (result is not null)
+                        {
+                            stepOk = true;
+                            var formatStr = result.Format == CaptureFormat.Png ? "png" : "jpeg";
+                            screenshotPath = _runLogger.SaveScreenshot(runId, stepId, result.ImageBytes, formatStr);
+                            stepResponse = new
+                            {
+                                screenshotPath,
+                                format = formatStr,
+                                regionRectPx = new { x = result.Metadata.RegionRectPx.X, y = result.Metadata.RegionRectPx.Y, w = result.Metadata.RegionRectPx.W, h = result.Metadata.RegionRectPx.H },
+                                ts = result.Metadata.Ts,
+                                scale = result.Metadata.Scale,
+                                dpi = result.Metadata.Dpi
+                            };
+                        }
+                        else
+                        {
+                            stepError = "CAPTURE_FAILED";
+                        }
+                    }
+                    else if (stepType == "mouse")
+                    {
+                        var mouseReq = step.Mouse;
+                        if (mouseReq is null)
+                        {
+                            stepError = "BAD_REQUEST: mouse object required for type=mouse";
+                        }
+                        else
+                        {
+                            var result = mouseInputProvider.Execute(mouseReq);
+                            stepOk = result.Ok;
+                            stepError = result.Error;
+                            stepResponse = new { success = result.Ok };
+                        }
+                    }
+                    else if (stepType == "key")
+                    {
+                        var keyReq = step.Key;
+                        if (keyReq is null)
+                        {
+                            stepError = "BAD_REQUEST: key object required for type=key";
+                        }
+                        else
+                        {
+                            var result = keyInputProvider.Execute(keyReq);
+                            stepOk = result.Ok;
+                            stepError = result.Error;
+                            stepResponse = new { success = result.Ok };
+                        }
+                    }
+                    else if (stepType == "delay")
+                    {
+                        var delayMs = step.DelayMs ?? 0;
+                        if (delayMs > 0)
+                        {
+                            await System.Threading.Tasks.Task.Delay(delayMs);
+                        }
+                        stepOk = true;
+                        stepResponse = new { delayMs };
+                    }
+                    else
+                    {
+                        stepError = $"BAD_REQUEST: unknown step type '{step.Type}'";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    stepError = ex.Message;
+                }
+
+                sw.Stop();
+                var durationMs = sw.ElapsedMilliseconds;
+
+                if (!stepOk) overallOk = false;
+
+                var logEntry = new StepLogEntry
+                {
+                    StepId = stepId,
+                    Endpoint = $"/macro/run#{step.Type}",
+                    TsMs = tsMs,
+                    Request = step,
+                    Response = stepResponse,
+                    Ok = stepOk,
+                    Error = stepError,
+                    DurationMs = durationMs,
+                    ScreenshotPath = screenshotPath
+                };
+                _runLogger.LogStep(runId, logEntry);
+
+                stepResults.Add(new
+                {
+                    stepId,
+                    type = step.Type,
+                    ok = stepOk,
+                    error = stepError,
+                    durationMs,
+                    response = stepResponse,
+                    screenshotPath
                 });
+
+                if (!stepOk && (step.OnFailure?.ToLowerInvariant() ?? "stop") == "stop")
+                {
+                    break;
+                }
             }
 
             return Results.Json(new
             {
-                runId = result.RunId,
-                ok = true,
-                steps = result.Steps
+                runId,
+                ok = overallOk,
+                steps = stepResults
             });
         });
 
@@ -484,6 +631,7 @@ public sealed class ApiHost : IDisposable
         try { _app.StopAsync().GetAwaiter().GetResult(); } catch { }
         try { _app.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
         _app = null;
+        _runLogger.Dispose();
     }
 
     private static bool TimingSafeEquals(string a, string b)
@@ -530,3 +678,21 @@ public sealed record CaptureWindowMatch(
     string? ProcessName);
 
 public sealed record CaptureRegion(int X, int Y, int W, int H);
+
+public sealed record MacroRunRequest(MacroStep[]? Steps);
+
+public sealed record MacroStep(
+    string? Type,
+    MacroCaptureRequest? Capture,
+    MouseInputRequest? Mouse,
+    KeyInputRequest? Key,
+    int? DelayMs,
+    string? OnFailure);
+
+public sealed record MacroCaptureRequest(
+    string? Mode,
+    CaptureWindowMatch? Window,
+    CaptureRegion? Region,
+    string? Format,
+    int? Quality,
+    int? DisplayIndex);

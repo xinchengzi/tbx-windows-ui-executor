@@ -32,8 +32,35 @@
 
 ### 1.3 可观测性
 - 所有请求生成 `runId`；动作生成 `stepId`。
-- 默认记录结构化日志；关键动作（输入/聚焦/宏）可配置“前后截图”。
-- 支持导出某个 run 的“证据包”（JSONL + 截图序列）。
+- 默认记录结构化日志；关键动作（输入/聚焦/宏）可配置"前后截图"。
+- 支持导出某个 run 的"证据包"（JSONL + 截图序列）。
+
+### 1.4 证据包（Evidence Bundle）
+
+**存储位置**：`%APPDATA%/TbxExecutor/runs/<runId>/`
+
+**目录结构**：
+```
+runs/
+  <runId>/
+    steps.jsonl           # 每行一个 JSON，记录每个步骤
+    screenshots/          # 可选：截图文件夹
+      step_<stepId>.png   # 截图文件
+      step_<stepId>.jpg
+```
+
+**steps.jsonl 格式**：
+```json
+{"stepId":"abc123","endpoint":"/capture","tsMs":1707123456789,"ok":true,"durationMs":150,"screenshotPath":"screenshots/step_abc123.png","request":{...},"response":{...}}
+```
+
+**触发条件**：
+- `/capture`：当请求头包含 `X-Run-Id` 时，截图会同时保存到 runs 目录
+- `/macro/run`：每个步骤的请求和结果自动记录到 `steps.jsonl`，截图用相对路径引用（不记录 `imageB64`）
+
+**安全约束**：
+- **绝不记录 Bearer Token**：日志中不包含任何认证信息
+- 网络/认证中间件不变
 
 ---
 

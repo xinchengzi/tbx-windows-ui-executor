@@ -6,67 +6,49 @@
 ## 2026-02-05 (Update 4)
 
 ### Completed
-- Implemented `POST /macro/run` endpoint for batch macro execution:
-  - **Step types**: `window.focus`, `capture`, `input.mouse`, `input.key`, `sleep`
-  - **Sequential execution**: Steps run in order with individual results
-  - **Fail-fast mode**: Optional early termination on first failure (default: true)
-  - **Humanization defaults**: Apply `delayMs`/`jitterPx` to all steps via `defaults.humanize`
-  - **Run ID**: Uses `X-Run-Id` header if present, otherwise generates new ID
-  - **UAC handling**: Returns 412 `UAC_REQUIRED` if blocked by secure desktop
-  - **Capture schema**: `capture` step returns same schema as `/capture` endpoint
-- Created `MacroRunner.cs` with step execution logic reusing existing providers
-- Updated API documentation with full `/macro/run` specification
+- Implemented evidence bundle logging for runs and macro steps:
+  - Added `RunLogger` class that writes to `%APPDATA%/TbxExecutor/runs/<runId>/`
+  - `steps.jsonl`: One JSON line per step/result
+  - `screenshots/`: Optional folder for captured images
+  - Token redaction: Bearer tokens are never logged
+- Enhanced `/capture` endpoint:
+  - When `X-Run-Id` header is present, screenshots are saved to the run's screenshots folder
+  - Response unchanged (still returns `imageB64`)
+- Added `/macro/run` endpoint:
+  - Executes a sequence of steps (capture, mouse, key, delay)
+  - Each step logged to `steps.jsonl`
+  - Screenshots stored as file references (no `imageB64` in logs)
+  - Supports `onFailure: "stop"` (default) or `"continue"`
+- Updated API documentation with `/macro/run` specification
+- Updated spec.md with evidence bundle section (1.4)
 
-### How to test (POST /macro/run)
-
-1) Focus window and capture:
+### How to test (evidence bundle)
+1) Start the tray app on Windows 11.
+2) Call `/macro/run` with a sequence of steps:
 ```bash
 curl -X POST http://100.115.92.6:17890/macro/run \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
+  -H "X-Run-Id: test-run-001" \
   -d '{
     "steps": [
-      {"kind":"window.focus", "match": {"processName":"notepad"}},
-      {"kind":"sleep", "ms": 100},
-      {"kind":"capture", "mode":"window", "window": {"processName":"notepad"}}
+      {"type": "capture", "capture": {"mode": "screen"}},
+      {"type": "mouse", "mouse": {"kind": "click", "x": 500, "y": 300}},
+      {"type": "delay", "delayMs": 100},
+      {"type": "capture", "capture": {"mode": "screen"}}
     ]
   }'
 ```
+3) Check `%APPDATA%/TbxExecutor/runs/test-run-001/`:
+   - `steps.jsonl` should contain 4 lines (one per step)
+   - `screenshots/` should contain 2 PNG files
+4) Verify `imageB64` is NOT present in `steps.jsonl` (only `screenshotPath` references)
+5) Verify Bearer token is NOT present anywhere in logs
 
-2) Mouse click and keyboard input:
-```bash
-curl -X POST http://100.115.92.6:17890/macro/run \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "steps": [
-      {"kind":"input.mouse", "x": 500, "y": 300},
-      {"kind":"input.key", "keys": ["CTRL", "A"]}
-    ],
-    "defaults": {"humanize": {"delayMs": [10, 50], "jitterPx": 1}}
-  }'
-```
-
-3) Test fail-fast behavior:
-```bash
-curl -X POST http://100.115.92.6:17890/macro/run \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "steps": [
-      {"kind":"window.focus", "match": {"titleContains":"NonExistentWindow"}},
-      {"kind":"capture", "mode":"screen"}
-    ],
-    "failFast": true
-  }'
-# Expected: First step fails with WINDOW_NOT_FOUND, second step not executed
-```
-
-4) Test locked workstation (Win+L, then try any macro):
-   - Expected: 409 LOCKED response
-
-5) Test UAC blocking (trigger UAC prompt, then try input macro):
-   - Expected: 412 UAC_REQUIRED in step result
+### Notes
+- Evidence bundle directory is created on first write
+- Screenshots folder is created only when captures occur
+- Network/auth middleware unchanged per constraints
 
 ---
 
