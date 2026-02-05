@@ -454,172 +454,38 @@ public sealed class ApiHost : IDisposable
                 return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
             }
 
-            if (payload?.Steps is null || payload.Steps.Length == 0)
+            if (payload is null)
             {
-                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST: steps array required"));
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
             }
 
             var runId = (string?)ctx.Items["runId"] ?? Guid.NewGuid().ToString("n");
-            var stepResults = new List<object>();
-            var overallOk = true;
 
-            foreach (var step in payload.Steps)
+            var runner = new MacroRunner(
+                windowManager,
+                captureProvider,
+                mouseInputProvider,
+                keyInputProvider);
+
+            var result = runner.Execute(payload, runId);
+
+            foreach (var step in result.Steps)
             {
-                var stepId = Guid.NewGuid().ToString("n");
-                var sw = Stopwatch.StartNew();
-                var tsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                object? stepResponse = null;
-                bool stepOk = false;
-                string? stepError = null;
-                string? screenshotPath = null;
-
-                try
+                _runLogger.LogStep(runId, new StepLogEntry
                 {
-                    var stepType = step.Type?.ToLowerInvariant() ?? "";
-
-                    if (stepType == "capture")
-                    {
-                        var captureReq = step.Capture ?? new MacroCaptureRequest(null, null, null, null, null, null);
-                        var mode = captureReq.Mode?.ToLowerInvariant() switch
-                        {
-                            "window" => CaptureMode.Window,
-                            "region" => CaptureMode.Region,
-                            _ => CaptureMode.Screen
-                        };
-                        var format = captureReq.Format?.ToLowerInvariant() switch
-                        {
-                            "jpeg" or "jpg" => CaptureFormat.Jpeg,
-                            _ => CaptureFormat.Png
-                        };
-                        WindowMatch? windowMatch = null;
-                        if (captureReq.Window is not null)
-                        {
-                            windowMatch = new WindowMatch(
-                                captureReq.Window.TitleContains,
-                                captureReq.Window.TitleRegex,
-                                captureReq.Window.ProcessName);
-                        }
-                        RectPx? region = null;
-                        if (captureReq.Region is not null)
-                        {
-                            region = new RectPx(captureReq.Region.X, captureReq.Region.Y, captureReq.Region.W, captureReq.Region.H);
-                        }
-
-                        var request = new CaptureRequest(mode, windowMatch, region, format, captureReq.Quality ?? 90, captureReq.DisplayIndex);
-                        var result = captureProvider.Capture(request, windowManager);
-
-                        if (result is not null)
-                        {
-                            stepOk = true;
-                            var formatStr = result.Format == CaptureFormat.Png ? "png" : "jpeg";
-                            screenshotPath = _runLogger.SaveScreenshot(runId, stepId, result.ImageBytes, formatStr);
-                            stepResponse = new
-                            {
-                                screenshotPath,
-                                format = formatStr,
-                                regionRectPx = new { x = result.Metadata.RegionRectPx.X, y = result.Metadata.RegionRectPx.Y, w = result.Metadata.RegionRectPx.W, h = result.Metadata.RegionRectPx.H },
-                                ts = result.Metadata.Ts,
-                                scale = result.Metadata.Scale,
-                                dpi = result.Metadata.Dpi
-                            };
-                        }
-                        else
-                        {
-                            stepError = "CAPTURE_FAILED";
-                        }
-                    }
-                    else if (stepType == "mouse")
-                    {
-                        var mouseReq = step.Mouse;
-                        if (mouseReq is null)
-                        {
-                            stepError = "BAD_REQUEST: mouse object required for type=mouse";
-                        }
-                        else
-                        {
-                            var result = mouseInputProvider.Execute(mouseReq);
-                            stepOk = result.Ok;
-                            stepError = result.Error;
-                            stepResponse = new { success = result.Ok };
-                        }
-                    }
-                    else if (stepType == "key")
-                    {
-                        var keyReq = step.Key;
-                        if (keyReq is null)
-                        {
-                            stepError = "BAD_REQUEST: key object required for type=key";
-                        }
-                        else
-                        {
-                            var result = keyInputProvider.Execute(keyReq);
-                            stepOk = result.Ok;
-                            stepError = result.Error;
-                            stepResponse = new { success = result.Ok };
-                        }
-                    }
-                    else if (stepType == "delay")
-                    {
-                        var delayMs = step.DelayMs ?? 0;
-                        if (delayMs > 0)
-                        {
-                            await System.Threading.Tasks.Task.Delay(delayMs);
-                        }
-                        stepOk = true;
-                        stepResponse = new { delayMs };
-                    }
-                    else
-                    {
-                        stepError = $"BAD_REQUEST: unknown step type '{step.Type}'";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    stepError = ex.Message;
-                }
-
-                sw.Stop();
-                var durationMs = sw.ElapsedMilliseconds;
-
-                if (!stepOk) overallOk = false;
-
-                var logEntry = new StepLogEntry
-                {
-                    StepId = stepId,
-                    Endpoint = $"/macro/run#{step.Type}",
-                    TsMs = tsMs,
-                    Request = step,
-                    Response = stepResponse,
-                    Ok = stepOk,
-                    Error = stepError,
-                    DurationMs = durationMs,
-                    ScreenshotPath = screenshotPath
-                };
-                _runLogger.LogStep(runId, logEntry);
-
-                stepResults.Add(new
-                {
-                    stepId,
-                    type = step.Type,
-                    ok = stepOk,
-                    error = stepError,
-                    durationMs,
-                    response = stepResponse,
-                    screenshotPath
+                    StepId = step.StepId,
+                    Endpoint = "/macro/run",
+                    TsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    Request = null,
+                    Response = step,
+                    Ok = step.Ok,
+                    Error = step.Error,
+                    DurationMs = null,
+                    ScreenshotPath = null
                 });
-
-                if (!stepOk && (step.OnFailure?.ToLowerInvariant() ?? "stop") == "stop")
-                {
-                    break;
-                }
             }
 
-            return Results.Json(new
-            {
-                runId,
-                ok = overallOk,
-                steps = stepResults
-            });
+            return Results.Json(ApiResponse.Ok(ctx, result));
         });
 
         _app = app;
