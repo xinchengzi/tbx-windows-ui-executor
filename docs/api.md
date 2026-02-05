@@ -776,3 +776,199 @@ curl -X POST http://100.115.92.6:17890/macro/run \
     ]
   }'
 ```
+
+## Evidence Bundle Endpoints
+
+These endpoints allow reading evidence bundle data (runs, steps, screenshots) via HTTP.
+
+### GET /run/list
+
+Lists recent execution runs.
+
+#### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `limit` | int (query) | No | Maximum runs to return (default: 20, max: 100) |
+
+#### Response
+
+```json
+{
+  "runId": "abc123",
+  "stepId": "def456",
+  "ok": true,
+  "data": [
+    {
+      "runId": "my-test-run-001",
+      "lastWriteUtc": "2024-02-05T10:30:00Z",
+      "stepsCount": 5,
+      "hasScreenshots": true
+    },
+    {
+      "runId": "another-run-002",
+      "lastWriteUtc": "2024-02-04T15:20:00Z",
+      "stepsCount": 3,
+      "hasScreenshots": false
+    }
+  ]
+}
+```
+
+#### Example
+
+```bash
+curl -X GET "http://100.115.92.6:17890/run/list?limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /run/steps
+
+Returns the steps.jsonl content for a specific run.
+
+#### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `runId` | string (query) | **Yes** | Run ID (must match `[a-zA-Z0-9_-]+`) |
+
+#### Response
+
+Returns NDJSON (newline-delimited JSON) with `Content-Type: application/x-ndjson`.
+
+Each line is a JSON object representing a step:
+
+```json
+{"stepId":"abc123","endpoint":"/capture","tsMs":1707123456789,"ok":true,...}
+{"stepId":"def456","endpoint":"/input/mouse","tsMs":1707123456800,"ok":true,...}
+```
+
+#### Errors
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `INVALID_RUN_ID` | runId contains invalid characters |
+| 404 | `RUN_NOT_FOUND` | Run does not exist or has no steps |
+
+#### Example
+
+```bash
+curl -X GET "http://100.115.92.6:17890/run/steps?runId=my-test-run-001" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /run/screenshot
+
+Returns a screenshot file for a specific step.
+
+#### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `runId` | string (query) | **Yes** | Run ID (must match `[a-zA-Z0-9_-]+`) |
+| `stepId` | string (query) | **Yes** | Step ID (must match `[a-zA-Z0-9_-]+`) |
+
+#### Response
+
+Returns the screenshot image with appropriate `Content-Type` (`image/png` or `image/jpeg`).
+
+#### Errors
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `INVALID_RUN_ID` | runId contains invalid characters |
+| 400 | `INVALID_STEP_ID` | stepId contains invalid characters |
+| 404 | `SCREENSHOT_NOT_FOUND` | Screenshot file does not exist |
+
+#### Example
+
+```bash
+curl -X GET "http://100.115.92.6:17890/run/screenshot?runId=my-test-run-001&stepId=abc123def456" \
+  -H "Authorization: Bearer $TOKEN" \
+  --output screenshot.png
+```
+
+#### Security
+
+- `runId` and `stepId` are validated against `[a-zA-Z0-9_-]+` pattern
+- Path traversal attacks are prevented by strict validation
+- All file access is constrained to `%APPDATA%\TbxExecutor\runs\` directory
+
+## Window Capture Enhancement
+
+When using `mode: "window"` for capture, the system now uses intelligent window selection:
+
+### Window Selection Scoring
+
+Windows are scored and ranked based on:
+
+| Factor | Score |
+|--------|-------|
+| Foreground window | +200 |
+| Visible and non-minimized | +100 |
+| Visible but minimized | +50 |
+| Valid rect (w/h > 0) | +50 |
+| ProcessName exact match | +30 |
+| TitleContains match | +20 |
+| Window area (normalized) | +0~30 |
+
+The highest-scoring window is selected.
+
+### Response with Window Metadata
+
+When capturing a window, the response includes `selectedWindow` with audit information:
+
+```json
+{
+  "data": {
+    "imageB64": "...",
+    "format": "png",
+    "regionRectPx": { "x": 100, "y": 100, "w": 800, "h": 600 },
+    "windowRectPx": { "x": 100, "y": 100, "w": 800, "h": 600 },
+    "ts": 1707123456789,
+    "scale": 1.75,
+    "dpi": 168,
+    "displayIndex": 0,
+    "deviceName": "\\\\.\\DISPLAY1",
+    "selectedWindow": {
+      "hwnd": 12345678,
+      "title": "QQ",
+      "processName": "QQ",
+      "rectPx": { "x": 100, "y": 100, "w": 800, "h": 600 },
+      "isVisible": true,
+      "isMinimized": false,
+      "score": 280
+    }
+  }
+}
+```
+
+### Capture Failure Diagnostics
+
+When window capture fails, the error response includes diagnostic information:
+
+```json
+{
+  "ok": false,
+  "status": 404,
+  "error": "CAPTURE_FAILED",
+  "data": {
+    "reason": "NO_MATCHING_WINDOWS",
+    "candidates": [
+      {
+        "hwnd": 12345678,
+        "title": "Notepad - Untitled",
+        "processName": "notepad",
+        "score": 0,
+        "isVisible": true,
+        "isMinimized": false,
+        "width": 800,
+        "height": 600
+      },
+      ...
+    ]
+  }
+}
+```
+
+The `candidates` array shows the top 5 visible windows to help diagnose why no match was found.

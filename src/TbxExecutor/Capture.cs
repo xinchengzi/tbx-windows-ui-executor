@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -70,20 +71,49 @@ public sealed record CaptureMetadata(
 public sealed record CaptureResult(
     byte[] ImageBytes,
     CaptureFormat Format,
-    CaptureMetadata Metadata);
+    CaptureMetadata Metadata,
+    WindowCaptureInfo? SelectedWindow = null);
+
+/// <summary>
+/// Information about a window selected for capture, used for auditing.
+/// </summary>
+public sealed record WindowCaptureInfo(
+    long Hwnd,
+    string Title,
+    string ProcessName,
+    RectPx RectPx,
+    bool IsVisible,
+    bool IsMinimized,
+    int Score);
+
+/// <summary>
+/// Capture failure details with diagnostic information.
+/// </summary>
+public sealed record CaptureFailure(
+    string Reason,
+    WindowCandidateSummary[]? Candidates = null);
+
+/// <summary>
+/// Summary of a candidate window for diagnostic output.
+/// </summary>
+public sealed record WindowCandidateSummary(
+    long Hwnd,
+    string Title,
+    string ProcessName,
+    int Score,
+    bool IsVisible,
+    bool IsMinimized,
+    int Width,
+    int Height);
 
 /// <summary>
 /// Interface for screen/window/region capture.
 /// </summary>
 public interface ICaptureProvider
 {
-    /// <summary>
-    /// Captures an image based on the request parameters.
-    /// </summary>
-    /// <param name="request">Capture request specifying mode, target, format, etc.</param>
-    /// <param name="windowManager">Window manager for resolving window matches.</param>
-    /// <returns>CaptureResult on success; null if the target cannot be found or captured.</returns>
     CaptureResult? Capture(CaptureRequest request, IWindowManager windowManager);
+
+    (CaptureResult? Result, CaptureFailure? Failure) CaptureWithDiagnostics(CaptureRequest request, IWindowManager windowManager);
 }
 
 /// <summary>
@@ -92,6 +122,9 @@ public interface ICaptureProvider
 public sealed class NullCaptureProvider : ICaptureProvider
 {
     public CaptureResult? Capture(CaptureRequest request, IWindowManager windowManager) => null;
+
+    public (CaptureResult? Result, CaptureFailure? Failure) CaptureWithDiagnostics(CaptureRequest request, IWindowManager windowManager)
+        => (null, new CaptureFailure("NOT_IMPLEMENTED"));
 }
 
 /// <summary>
@@ -119,6 +152,17 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
         };
     }
 
+    public (CaptureResult? Result, CaptureFailure? Failure) CaptureWithDiagnostics(CaptureRequest request, IWindowManager windowManager)
+    {
+        return request.Mode switch
+        {
+            CaptureMode.Screen => (CaptureScreen(request), null),
+            CaptureMode.Window => CaptureWindowWithDiagnostics(request, windowManager),
+            CaptureMode.Region => (CaptureRegion(request), null),
+            _ => (null, new CaptureFailure("UNKNOWN_MODE"))
+        };
+    }
+
     private CaptureResult? CaptureScreen(CaptureRequest request)
     {
         // Capture primary monitor by default, or a specific display when displayIndex is provided.
@@ -141,27 +185,23 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
         return CaptureRectWithBitBlt(rect, null, request.Format, request.Quality);
     }
 
-    private CaptureResult? CaptureWindow(CaptureRequest request, IWindowManager windowManager)
+    private (CaptureResult? Result, CaptureFailure? Failure) CaptureWindowWithDiagnostics(CaptureRequest request, IWindowManager windowManager)
     {
-        if (request.Window is null) return null;
+        if (request.Window is null)
+            return (null, new CaptureFailure("NO_WINDOW_MATCH_PROVIDED"));
 
-        // Find the window
         var windows = windowManager.ListWindows();
-        WindowInfo? target = null;
+        var scored = ScoreAndRankWindows(windows, request.Window);
 
-        foreach (var window in windows)
-        {
-            if (MatchesWindow(window, request.Window))
-            {
-                target = window;
-                break;
-            }
-        }
+        if (scored.Count == 0)
+            return (null, new CaptureFailure("NO_MATCHING_WINDOWS", GetTopCandidates(windows, 5)));
 
-        if (target is null) return null;
+        var target = scored[0].Window;
+        var targetScore = scored[0].Score;
 
         var hwnd = new IntPtr(target.Hwnd);
-        if (!GetWindowRect(hwnd, out var rect)) return null;
+        if (!GetWindowRect(hwnd, out var rect))
+            return (null, new CaptureFailure("WINDOW_RECT_UNAVAILABLE", GetScoredCandidates(scored, 5)));
 
         var windowRect = new RectPx(
             rect.Left,
@@ -169,14 +209,124 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
             Math.Max(0, rect.Right - rect.Left),
             Math.Max(0, rect.Bottom - rect.Top));
 
-        if (windowRect.W <= 0 || windowRect.H <= 0) return null;
+        if (windowRect.W <= 0 || windowRect.H <= 0)
+            return (null, new CaptureFailure("WINDOW_RECT_INVALID", GetScoredCandidates(scored, 5)));
 
-        // Try PrintWindow first, then fall back to BitBlt
         var result = TryPrintWindow(hwnd, windowRect, request.Format, request.Quality);
-        if (result is not null) return result;
+        if (result is null)
+            result = CaptureRectWithBitBlt(windowRect, windowRect, request.Format, request.Quality);
 
-        // Fallback to BitBlt (may not work for off-screen/occluded windows)
-        return CaptureRectWithBitBlt(windowRect, windowRect, request.Format, request.Quality);
+        if (result is null)
+            return (null, new CaptureFailure("CAPTURE_OPERATION_FAILED", GetScoredCandidates(scored, 5)));
+
+        var selectedWindow = new WindowCaptureInfo(
+            target.Hwnd,
+            target.Title,
+            target.ProcessName,
+            windowRect,
+            target.IsVisible,
+            target.IsMinimized,
+            targetScore);
+
+        return (result with { SelectedWindow = selectedWindow }, null);
+    }
+
+    private CaptureResult? CaptureWindow(CaptureRequest request, IWindowManager windowManager)
+    {
+        var (result, _) = CaptureWindowWithDiagnostics(request, windowManager);
+        return result;
+    }
+
+    private List<(WindowInfo Window, int Score)> ScoreAndRankWindows(IReadOnlyList<WindowInfo> windows, WindowMatch match)
+    {
+        var scored = new List<(WindowInfo Window, int Score)>();
+
+        foreach (var window in windows)
+        {
+            if (!MatchesWindow(window, match)) continue;
+
+            int score = 0;
+
+            // Visible and non-minimized: +100
+            if (window.IsVisible && !window.IsMinimized) score += 100;
+            else if (window.IsVisible) score += 50;
+
+            // Valid rect (w/h > 0): +50
+            if (window.RectPx.W > 0 && window.RectPx.H > 0) score += 50;
+
+            // Larger window area: +0~30 (normalized)
+            var area = window.RectPx.W * window.RectPx.H;
+            if (area > 0) score += Math.Min(30, area / 100000);
+
+            // Title match quality: +20 for exact contains, +10 for regex
+            if (!string.IsNullOrWhiteSpace(match.TitleContains) &&
+                window.Title?.IndexOf(match.TitleContains, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                score += 20;
+            }
+
+            // ProcessName exact match: +30
+            if (!string.IsNullOrWhiteSpace(match.ProcessName) &&
+                string.Equals(window.ProcessName, match.ProcessName, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 30;
+            }
+
+            // Check if foreground window (hwnd matches foreground)
+            var foreground = GetForegroundWindow();
+            if (foreground != IntPtr.Zero && window.Hwnd == foreground.ToInt64())
+            {
+                score += 200;
+            }
+
+            scored.Add((window, score));
+        }
+
+        scored.Sort((a, b) => b.Score.CompareTo(a.Score));
+        return scored;
+    }
+
+    private static WindowCandidateSummary[] GetScoredCandidates(List<(WindowInfo Window, int Score)> scored, int limit)
+    {
+        var result = new WindowCandidateSummary[Math.Min(limit, scored.Count)];
+        for (int i = 0; i < result.Length; i++)
+        {
+            var (w, s) = scored[i];
+            result[i] = new WindowCandidateSummary(
+                w.Hwnd,
+                TruncateTitle(w.Title, 60),
+                w.ProcessName,
+                s,
+                w.IsVisible,
+                w.IsMinimized,
+                w.RectPx.W,
+                w.RectPx.H);
+        }
+        return result;
+    }
+
+    private static WindowCandidateSummary[] GetTopCandidates(IReadOnlyList<WindowInfo> windows, int limit)
+    {
+        var visible = windows
+            .Where(w => w.IsVisible && !w.IsMinimized && w.RectPx.W > 0 && w.RectPx.H > 0)
+            .Take(limit)
+            .Select(w => new WindowCandidateSummary(
+                w.Hwnd,
+                TruncateTitle(w.Title, 60),
+                w.ProcessName,
+                0,
+                w.IsVisible,
+                w.IsMinimized,
+                w.RectPx.W,
+                w.RectPx.H))
+            .ToArray();
+        return visible;
+    }
+
+    private static string TruncateTitle(string? title, int maxLen)
+    {
+        if (string.IsNullOrEmpty(title)) return string.Empty;
+        return title.Length <= maxLen ? title : title.Substring(0, maxLen - 3) + "...";
     }
 
     private CaptureResult? CaptureRegion(CaptureRequest request)
@@ -419,6 +569,9 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hwnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT

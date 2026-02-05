@@ -225,10 +225,15 @@ public sealed class MacroRunner
             Quality: step.Quality ?? 90,
             DisplayIndex: step.DisplayIndex);
 
-        var result = _captureProvider.Capture(request, _windowManager);
+        var (result, failure) = _captureProvider.CaptureWithDiagnostics(request, _windowManager);
         if (result is null)
         {
-            return new MacroStepResult(stepId, false, 404, "CAPTURE_FAILED");
+            var errorData = failure is not null ? new
+            {
+                reason = failure.Reason,
+                candidates = failure.Candidates
+            } : null;
+            return new MacroStepResult(stepId, false, 404, $"CAPTURE_FAILED: {failure?.Reason}", errorData);
         }
 
         var responseData = new
@@ -243,7 +248,17 @@ public sealed class MacroRunner
             scale = result.Metadata.Scale,
             dpi = result.Metadata.Dpi,
             displayIndex = result.Metadata.DisplayIndex,
-            deviceName = result.Metadata.DeviceName
+            deviceName = result.Metadata.DeviceName,
+            selectedWindow = result.SelectedWindow is not null ? new
+            {
+                hwnd = result.SelectedWindow.Hwnd,
+                title = result.SelectedWindow.Title,
+                processName = result.SelectedWindow.ProcessName,
+                rectPx = new { x = result.SelectedWindow.RectPx.X, y = result.SelectedWindow.RectPx.Y, w = result.SelectedWindow.RectPx.W, h = result.SelectedWindow.RectPx.H },
+                isVisible = result.SelectedWindow.IsVisible,
+                isMinimized = result.SelectedWindow.IsMinimized,
+                score = result.SelectedWindow.Score
+            } : null
         };
 
         return new MacroStepResult(stepId, true, Data: responseData);

@@ -294,10 +294,25 @@ public sealed class ApiHost : IDisposable
                 Quality: payload.Quality ?? 90,
                 DisplayIndex: payload.DisplayIndex);
 
-            var result = captureProvider.Capture(request, windowManager);
+            var (result, failure) = captureProvider.CaptureWithDiagnostics(request, windowManager);
             if (result is null)
             {
-                return Results.Json(ApiResponse.Error(ctx, 404, "CAPTURE_FAILED"));
+                var errorResponse = new
+                {
+                    reason = failure?.Reason ?? "CAPTURE_FAILED",
+                    candidates = failure?.Candidates?.Select(c => new
+                    {
+                        hwnd = c.Hwnd,
+                        title = c.Title,
+                        processName = c.ProcessName,
+                        score = c.Score,
+                        isVisible = c.IsVisible,
+                        isMinimized = c.IsMinimized,
+                        width = c.Width,
+                        height = c.Height
+                    }).ToArray()
+                };
+                return Results.Json(ApiResponse.ErrorWithData(ctx, 404, "CAPTURE_FAILED", errorResponse));
             }
 
             var runId = (string?)ctx.Items["runId"];
@@ -323,7 +338,17 @@ public sealed class ApiHost : IDisposable
                 scale = result.Metadata.Scale,
                 dpi = result.Metadata.Dpi,
                 displayIndex = result.Metadata.DisplayIndex,
-                deviceName = result.Metadata.DeviceName
+                deviceName = result.Metadata.DeviceName,
+                selectedWindow = result.SelectedWindow is not null ? new
+                {
+                    hwnd = result.SelectedWindow.Hwnd,
+                    title = result.SelectedWindow.Title,
+                    processName = result.SelectedWindow.ProcessName,
+                    rectPx = new { x = result.SelectedWindow.RectPx.X, y = result.SelectedWindow.RectPx.Y, w = result.SelectedWindow.RectPx.W, h = result.SelectedWindow.RectPx.H },
+                    isVisible = result.SelectedWindow.IsVisible,
+                    isMinimized = result.SelectedWindow.IsMinimized,
+                    score = result.SelectedWindow.Score
+                } : null
             };
 
             return Results.Json(ApiResponse.Ok(ctx, responseData));
@@ -488,6 +513,64 @@ public sealed class ApiHost : IDisposable
             return Results.Json(ApiResponse.Ok(ctx, result));
         });
 
+        var runsService = new RunsService();
+
+        app.MapGet("/run/list", (HttpContext ctx) =>
+        {
+            var limitStr = ctx.Request.Query["limit"].FirstOrDefault();
+            var limit = 20;
+            if (!string.IsNullOrWhiteSpace(limitStr) && int.TryParse(limitStr, out var parsed) && parsed > 0)
+            {
+                limit = Math.Min(parsed, 100);
+            }
+
+            var runs = runsService.ListRuns(limit);
+            return Results.Json(ApiResponse.Ok(ctx, runs));
+        });
+
+        app.MapGet("/run/steps", (HttpContext ctx) =>
+        {
+            var runId = ctx.Request.Query["runId"].FirstOrDefault();
+            if (!RunsService.IsValidRunId(runId))
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "INVALID_RUN_ID"));
+            }
+
+            var (found, content) = runsService.GetSteps(runId!);
+            if (!found || content is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 404, "RUN_NOT_FOUND"));
+            }
+
+            ctx.Response.ContentType = "application/x-ndjson";
+            return Results.Text(content, "application/x-ndjson");
+        });
+
+        app.MapGet("/run/screenshot", async (HttpContext ctx) =>
+        {
+            var runId = ctx.Request.Query["runId"].FirstOrDefault();
+            var stepId = ctx.Request.Query["stepId"].FirstOrDefault();
+
+            if (!RunsService.IsValidRunId(runId))
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "INVALID_RUN_ID"));
+            }
+
+            if (!RunsService.IsValidRunId(stepId))
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "INVALID_STEP_ID"));
+            }
+
+            var (found, filePath, contentType) = runsService.GetScreenshot(runId!, stepId!);
+            if (!found || filePath is null || contentType is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 404, "SCREENSHOT_NOT_FOUND"));
+            }
+
+            var bytes = await System.IO.File.ReadAllBytesAsync(filePath);
+            return Results.File(bytes, contentType);
+        });
+
         _app = app;
         await app.StartAsync();
     }
@@ -528,6 +611,16 @@ public static class ApiResponse
         ok = false,
         status,
         error
+    };
+
+    public static object ErrorWithData(HttpContext ctx, int status, string error, object? data) => new
+    {
+        runId = (string?)ctx.Items["runId"],
+        stepId = (string?)ctx.Items["stepId"],
+        ok = false,
+        status,
+        error,
+        data
     };
 }
 

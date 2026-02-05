@@ -171,3 +171,77 @@ curl -sS -H "Authorization: Bearer $TBX_TOKEN" \
   -d '{"mode":"region","region":{"x":100,"y":100,"w":400,"h":300}}' \
   http://$TBX_HOST:17890/capture | jq
 ```
+
+---
+
+## Checklist D — Window Capture Enhancement
+
+### D1. Window selection scoring
+- [ ] When multiple windows match the criteria, the system selects the best one based on scoring
+- [ ] Foreground window gets priority (+200 score)
+- [ ] Visible non-minimized windows are preferred (+100 score)
+
+### D2. Window metadata in response
+When capturing with `mode: "window"`:
+- [ ] Response includes `selectedWindow` object with:
+  - `hwnd` (window handle)
+  - `title` (window title)
+  - `processName` (process name)
+  - `rectPx` (window rect in physical pixels)
+  - `isVisible`, `isMinimized` (state flags)
+  - `score` (selection score for debugging)
+
+### D3. Diagnostic information on failure
+When window capture fails:
+- [ ] Response includes `data.reason` explaining why capture failed
+- [ ] Response includes `data.candidates` with top 5 visible windows
+- [ ] Each candidate includes hwnd, title, processName, score, dimensions
+
+### D4. Window capture curl example
+```bash
+# Capture QQ window with metadata
+curl -sS -H "Authorization: Bearer $TBX_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"window","window":{"processName":"QQ"}}' \
+  http://$TBX_HOST:17890/capture | jq '.data.selectedWindow'
+```
+
+---
+
+## Checklist E — Evidence Bundle HTTP Endpoints
+
+### E1. List runs
+- [ ] `GET /run/list` returns recent runs sorted by lastWriteUtc descending
+- [ ] Response includes runId, lastWriteUtc, stepsCount, hasScreenshots
+- [ ] `?limit=N` parameter works correctly
+
+```bash
+curl -sS -H "Authorization: Bearer $TBX_TOKEN" \
+  "http://$TBX_HOST:17890/run/list?limit=10" | jq
+```
+
+### E2. Get steps
+- [ ] `GET /run/steps?runId=...` returns steps.jsonl content
+- [ ] Response Content-Type is `application/x-ndjson`
+- [ ] Each line is valid JSON
+
+```bash
+curl -sS -H "Authorization: Bearer $TBX_TOKEN" \
+  "http://$TBX_HOST:17890/run/steps?runId=my-test-run" 
+```
+
+### E3. Get screenshot
+- [ ] `GET /run/screenshot?runId=...&stepId=...` returns image binary
+- [ ] Response Content-Type is `image/png` or `image/jpeg`
+- [ ] Invalid runId/stepId returns 400 error
+
+```bash
+curl -sS -H "Authorization: Bearer $TBX_TOKEN" \
+  "http://$TBX_HOST:17890/run/screenshot?runId=my-test-run&stepId=abc123" \
+  --output screenshot.png
+```
+
+### E4. Security validation
+- [ ] `runId` with path traversal characters (`../`, `..\\`) is rejected with 400
+- [ ] `stepId` with invalid characters is rejected with 400
+- [ ] Only `[a-zA-Z0-9_-]` pattern is accepted for runId and stepId
