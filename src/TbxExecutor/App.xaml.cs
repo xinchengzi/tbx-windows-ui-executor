@@ -1,21 +1,20 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
 
 namespace TbxExecutor;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private TrayHost? _tray;
     private ApiHost? _api;
 
-    protected override async void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
         base.OnStartup(e);
 
         // No main window; tray-only.
-        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
 
         // Ensure single instance (best-effort).
         var createdNew = false;
@@ -58,7 +57,7 @@ public partial class App : Application
         });
     }
 
-    protected override void OnExit(ExitEventArgs e)
+    protected override void OnExit(System.Windows.ExitEventArgs e)
     {
         _api?.Dispose();
         _tray?.Dispose();
