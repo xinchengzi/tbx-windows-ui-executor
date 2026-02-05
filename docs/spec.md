@@ -70,6 +70,8 @@
 
 ### 3.2 DPI-aware 要求
 - 进程必须启用 **Per-Monitor DPI Aware V2**。
+- **实现方式**：通过 `app.manifest` 文件在进程启动时设置（优先于 API 调用，由 Windows 在进程启动前读取）。
+- **验证方式**：调用 `GET /env`，检查 `dpiAwareness` 字段应返回 `"PerMonitorV2"`。
 - API 响应必须携带：
   - `dpi` / `scale`（单值或 `{x,y}`，如 `scale = 1.75`）
   - `windowRectPx` / `regionRectPx`（物理像素）

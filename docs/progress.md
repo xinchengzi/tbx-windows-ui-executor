@@ -117,5 +117,36 @@ curl -X POST http://100.115.92.6:17890/input/mouse \
    - Expected: 409 LOCKED response
 
 8) Multi-monitor test (if available):
-   - Use `GET /env` to find secondary monitor coordinates
-   - Click on secondary monitor using its physical pixel coordinates
+    - Use `GET /env` to find secondary monitor coordinates
+    - Click on secondary monitor using its physical pixel coordinates
+
+---
+
+## 2026-02-05 (Update 3)
+
+### Completed
+- Enforced **Per-Monitor DPI Aware V2** at process startup:
+  - Added `app.manifest` with `dpiAwareness=PerMonitorV2,PerMonitor` and fallback `dpiAware=true/PM`
+  - Updated `TbxExecutor.csproj` with `<ApplicationManifest>app.manifest</ApplicationManifest>`
+- Added DPI awareness self-check in `GET /env`:
+  - New field `dpiAwareness` returns current mode (e.g., `"PerMonitorV2"`)
+  - Implemented via `GetThreadDpiAwarenessContext` + `AreDpiAwarenessContextsEqual` Win32 APIs
+- Updated `docs/spec.md` with DPI awareness enforcement details
+
+### How to verify DPI awareness
+1) Start the tray app on Windows 10 1703+ / Windows 11.
+2) Call `GET /env`:
+```bash
+curl -s http://100.115.92.6:17890/env -H "Authorization: Bearer $TOKEN" | jq '.data.dpiAwareness'
+```
+3) Expected result: `"PerMonitorV2"`
+4) If result is `"SystemAware"` or `"Unaware"`, the manifest is not being applied correctly.
+
+### Technical notes
+- **Manifest vs API**: Manifest is preferred because Windows reads it before process initialization, avoiding race conditions.
+- **Fallback chain**: `PerMonitorV2` → `PerMonitor` (V1) → `true/PM` (legacy)
+- **Query method**: Uses `GetThreadDpiAwarenessContext()` which returns a pseudo-handle, then compares via `AreDpiAwarenessContextsEqual()`.
+
+### Next
+- M2 input endpoints (`/input/key`)
+- Consider adding `displayIndex/deviceName` in capture response
