@@ -302,7 +302,9 @@ public sealed class ApiHost : IDisposable
                     : null,
                 ts = result.Metadata.Ts,
                 scale = result.Metadata.Scale,
-                dpi = result.Metadata.Dpi
+                dpi = result.Metadata.Dpi,
+                displayIndex = result.Metadata.DisplayIndex,
+                deviceName = result.Metadata.DeviceName
             };
 
             return Results.Json(ApiResponse.Ok(ctx, responseData));
@@ -346,7 +348,9 @@ public sealed class ApiHost : IDisposable
                 testImageSize = result.ImageBytes.Length,
                 testRegionPx = new { w = result.Metadata.RegionRectPx.W, h = result.Metadata.RegionRectPx.H },
                 scale = result.Metadata.Scale,
-                dpi = result.Metadata.Dpi
+                dpi = result.Metadata.Dpi,
+                displayIndex = result.Metadata.DisplayIndex,
+                deviceName = result.Metadata.DeviceName
             }));
         });
 

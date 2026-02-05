@@ -52,13 +52,17 @@ public sealed record CaptureRequest(
 /// - ts: Unix timestamp in milliseconds.
 /// - scale: Display scale factor for the monitor containing the capture rect center (e.g., 1.75 for 175% scaling).
 /// - dpi: Display DPI (X axis) for the monitor containing the capture rect center (typically 96 * scale).
+/// - displayIndex: Index of the display used for scale/dpi derivation (null if unknown).
+/// - deviceName: Device name of the display (e.g., "\\\\.\\DISPLAY1"); null if unknown.
 /// </remarks>
 public sealed record CaptureMetadata(
     RectPx RegionRectPx,
     RectPx? WindowRectPx,
     long Ts,
     double Scale,
-    int Dpi);
+    int Dpi,
+    int? DisplayIndex = null,
+    string? DeviceName = null);
 
 /// <summary>
 /// Result of a capture operation.
@@ -302,13 +306,16 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
         var displays = _displayEnv.GetDisplays();
         var scale = 1.0;
         var dpi = 96;
+        int? displayIndex = null;
+        string? deviceName = null;
 
         var targetDisplay = DisplaySelector.ByRectCenter(displays, region);
         if (targetDisplay is not null)
         {
-            // Prefer X axis for single-value scale/dpi.
             scale = targetDisplay.ScaleX;
             dpi = targetDisplay.DpiX;
+            displayIndex = targetDisplay.Index;
+            deviceName = targetDisplay.DeviceName;
         }
 
         var metadata = new CaptureMetadata(
@@ -316,7 +323,9 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
             WindowRectPx: windowRect,
             Ts: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             Scale: scale,
-            Dpi: dpi);
+            Dpi: dpi,
+            DisplayIndex: displayIndex,
+            DeviceName: deviceName);
 
         return new CaptureResult(ms.ToArray(), format, metadata);
     }

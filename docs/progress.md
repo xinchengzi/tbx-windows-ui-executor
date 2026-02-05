@@ -53,8 +53,33 @@
 
 ### Next
 - Validate per-monitor DPI awareness is enabled at process startup.
-- Consider returning `displayIndex/deviceName` in capture response for easier debugging.
 - M2 input endpoints (`/input/key`).
+
+---
+
+## 2026-02-05 (Update 3)
+
+### Completed
+- Enhanced `/capture` and `/capture/selfcheck` responses to include display identity:
+  - Added optional `displayIndex` and `deviceName` fields to capture metadata
+  - `displayIndex`: Index of the display used for scale/dpi derivation (matches `GET /env`)
+  - `deviceName`: Device name of the display (e.g., `"\\\\.\\DISPLAY1"`)
+  - For `mode=screen`: reports the selected display (by `displayIndex` or primary)
+  - For `mode=window`/`mode=region`: reports the display containing the capture rect center
+- Updated API documentation with new response fields
+
+### How to test (display identity in capture)
+1) Call `GET /env` and note display indices and device names.
+2) Screen capture primary:
+   - `POST /capture` with `{ "mode": "screen" }`
+   - Verify `data.displayIndex` and `data.deviceName` match the primary display from `/env`.
+3) Screen capture by index:
+   - `POST /capture` with `{ "mode": "screen", "displayIndex": 1 }`
+   - Verify `data.displayIndex === 1` and `data.deviceName` matches `/env.displays[1].deviceName`.
+4) Region capture:
+   - Choose a region on each monitor and verify `displayIndex`/`deviceName` match.
+5) `/capture/selfcheck`:
+   - Verify response includes `displayIndex` and `deviceName` for the primary display.
 
 ---
 
