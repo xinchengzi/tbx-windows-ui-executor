@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -49,8 +50,8 @@ public sealed record CaptureRequest(
 /// - regionRectPx: The actual captured region in screen coordinates.
 /// - windowRectPx: If capturing a window, the window's rect; otherwise null.
 /// - ts: Unix timestamp in milliseconds.
-/// - scale: Display scale factor (e.g., 1.75 for 175% scaling). Placeholder if unavailable.
-/// - dpi: Display DPI (e.g., 168 for 175% scaling at 96 base). Placeholder if unavailable.
+/// - scale: Display scale factor for the monitor containing the capture rect center (e.g., 1.75 for 175% scaling).
+/// - dpi: Display DPI (X axis) for the monitor containing the capture rect center (typically 96 * scale).
 /// </remarks>
 public sealed record CaptureMetadata(
     RectPx RegionRectPx,
@@ -96,6 +97,13 @@ public sealed class NullCaptureProvider : ICaptureProvider
 /// </summary>
 public sealed class WindowsCaptureProvider : ICaptureProvider
 {
+    private readonly IDisplayEnvironmentProvider _displayEnv;
+
+    public WindowsCaptureProvider(IDisplayEnvironmentProvider displayEnv)
+    {
+        _displayEnv = displayEnv;
+    }
+
     public CaptureResult? Capture(CaptureRequest request, IWindowManager windowManager)
     {
         return request.Mode switch
@@ -109,18 +117,23 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
 
     private CaptureResult? CaptureScreen(CaptureRequest request)
     {
-        // Get virtual screen bounds (all monitors)
-        var x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        var y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        var width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        var height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        // Capture primary monitor by default, or a specific display when displayIndex is provided.
+        var displays = _displayEnv.GetDisplays();
+        RectPx rect;
 
-        if (width <= 0 || height <= 0) return null;
+        if (request.DisplayIndex is int idx)
+        {
+            var d = displays.FirstOrDefault(x => x.Index == idx);
+            if (d is null) return null;
+            rect = d.BoundsRectPx;
+        }
+        else
+        {
+            var primary = displays.FirstOrDefault(x => x.IsPrimary);
+            rect = primary?.BoundsRectPx ?? _displayEnv.GetVirtualScreenRectPx();
+        }
 
-        // TODO: If displayIndex is specified, get specific monitor bounds
-        // For now, capture entire virtual screen
-
-        var rect = new RectPx(x, y, width, height);
+        if (rect.W <= 0 || rect.H <= 0) return null;
         return CaptureRectWithBitBlt(rect, null, request.Format, request.Quality);
     }
 
@@ -286,12 +299,24 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
             bitmap.Save(ms, ImageFormat.Png);
         }
 
+        var displays = _displayEnv.GetDisplays();
+        var scale = 1.0;
+        var dpi = 96;
+
+        var targetDisplay = DisplaySelector.ByRectCenter(displays, region);
+        if (targetDisplay is not null)
+        {
+            // Prefer X axis for single-value scale/dpi.
+            scale = targetDisplay.ScaleX;
+            dpi = targetDisplay.DpiX;
+        }
+
         var metadata = new CaptureMetadata(
             RegionRectPx: region,
             WindowRectPx: windowRect,
             Ts: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            Scale: GetSystemScale(),
-            Dpi: GetSystemDpi());
+            Scale: scale,
+            Dpi: dpi);
 
         return new CaptureResult(ms.ToArray(), format, metadata);
     }
@@ -306,52 +331,7 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
         return null;
     }
 
-    private static double GetSystemScale()
-    {
-        // Get DPI scale from primary monitor
-        // This is a placeholder - ideally we'd get per-monitor DPI
-        try
-        {
-            var hdc = GetDC(IntPtr.Zero);
-            if (hdc != IntPtr.Zero)
-            {
-                try
-                {
-                    var dpi = GetDeviceCaps(hdc, LOGPIXELSX);
-                    return dpi / 96.0;
-                }
-                finally
-                {
-                    ReleaseDC(IntPtr.Zero, hdc);
-                }
-            }
-        }
-        catch { }
-
-        return 1.0; // Placeholder
-    }
-
-    private static int GetSystemDpi()
-    {
-        try
-        {
-            var hdc = GetDC(IntPtr.Zero);
-            if (hdc != IntPtr.Zero)
-            {
-                try
-                {
-                    return GetDeviceCaps(hdc, LOGPIXELSX);
-                }
-                finally
-                {
-                    ReleaseDC(IntPtr.Zero, hdc);
-                }
-            }
-        }
-        catch { }
-
-        return 96; // Placeholder
-    }
+    // (removed) GetSystemScale/GetSystemDpi: metadata now uses per-monitor DPI from WindowsDisplayEnvironmentProvider
 
     private static bool MatchesWindow(WindowInfo window, WindowMatch match)
     {
@@ -393,16 +373,9 @@ public sealed class WindowsCaptureProvider : ICaptureProvider
     }
 
     // P/Invoke declarations
-    private const int SM_XVIRTUALSCREEN = 76;
-    private const int SM_YVIRTUALSCREEN = 77;
-    private const int SM_CXVIRTUALSCREEN = 78;
-    private const int SM_CYVIRTUALSCREEN = 79;
     private const int LOGPIXELSX = 88;
     private const uint SRCCOPY = 0x00CC0020;
     private const uint PW_RENDERFULLCONTENT = 2;
-
-    [DllImport("user32.dll")]
-    private static extern int GetSystemMetrics(int nIndex);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetDC(IntPtr hwnd);

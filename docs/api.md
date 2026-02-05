@@ -16,7 +16,41 @@ Returns basic status.
 Includes `locked` when the workstation is locked.
 
 ## GET /env
-Returns environment metadata (display/DPI placeholders for now).
+
+Returns environment metadata, including per-monitor bounds and DPI.
+
+### Response
+
+```json
+{
+  "runId": "abc123",
+  "stepId": "def456",
+  "ok": true,
+  "data": {
+    "os": "Microsoft Windows NT 10.0.22631.0",
+    "coordinateSystem": "physicalPixels",
+    "virtualScreenRectPx": { "x": -1920, "y": 0, "w": 3840, "h": 2160 },
+    "displays": [
+      {
+        "index": 0,
+        "deviceName": "\\\\.\\DISPLAY1",
+        "isPrimary": true,
+        "boundsRectPx": { "x": 0, "y": 0, "w": 1920, "h": 1080 },
+        "workAreaRectPx": { "x": 0, "y": 0, "w": 1920, "h": 1040 },
+        "dpi": { "x": 168, "y": 168 },
+        "scale": { "x": 1.75, "y": 1.75 }
+      }
+    ]
+  }
+}
+```
+
+### Notes / limitations
+
+- All rectangles are in **physical pixels** in the **virtual screen** coordinate space.
+- Per-monitor DPI is retrieved via `GetDpiForMonitor(MDT_EFFECTIVE_DPI)` (Win 8.1+).
+  - Fallback uses `CreateDC("DISPLAY", deviceName, ...)` + `GetDeviceCaps(LOGPIXELS*)`.
+  - The fallback may return **system DPI** depending on process DPI awareness.
 
 ## GET /config
 Returns effective `listenHost`, `listenPort`, and `allowlistIps`.
@@ -80,7 +114,7 @@ Captures screen, window, or region. Returns PNG or JPEG image with metadata.
 | `region.h` | int | Yes | Height (physical pixels) |
 | `format` | string | No | `"png"` (default) or `"jpeg"`/`"jpg"` |
 | `quality` | int | No | JPEG quality 1-100 (default: 90). Ignored for PNG. |
-| `displayIndex` | int | No | Display index (placeholder, not yet implemented) |
+| `displayIndex` | int | No | When `mode=screen`: capture a specific display by index (from `GET /env`). Default: primary display. |
 
 ### Response
 
@@ -110,14 +144,17 @@ Captures screen, window, or region. Returns PNG or JPEG image with metadata.
 | `regionRectPx` | object | Actual captured region in physical screen pixels |
 | `windowRectPx` | object? | Window rect if mode=window; null otherwise |
 | `ts` | long | Unix timestamp in milliseconds |
-| `scale` | double | Display scale factor (e.g., 1.75 for 175% scaling). **Placeholder**: currently returns system-wide DPI. |
-| `dpi` | int | Display DPI (e.g., 168 for 175% at 96 base). **Placeholder**: currently returns system-wide DPI. |
+| `scale` | double | Display scale factor for the monitor containing the capture rect center (e.g., 1.75 for 175% scaling). |
+| `dpi` | int | Display DPI for the monitor containing the capture rect center (typically 96 * scale). |
 
 ### DPI Notes
 
 - All coordinates are **physical pixels** (DPI-aware).
 - The process assumes **Per-Monitor DPI Aware V2** is enabled.
-- `scale` and `dpi` are currently placeholders returning system-wide values. Per-monitor values will be added in future versions.
+- `scale`/`dpi` are reported for the **monitor containing the capture rectangle center**.
+  - `mode=window`: uses the window rect center.
+  - `mode=region`: uses the region rect center.
+  - `mode=screen`: uses the selected display (by `displayIndex`) or the primary display.
 
 ### Errors
 

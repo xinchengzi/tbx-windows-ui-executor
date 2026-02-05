@@ -20,28 +20,38 @@
 ### Current repo state
 - `main` @ `8035e4e` (2026-02-05): capture endpoint + tailnet binding helper + config endpoint.
 
-### Plan (next milestones)
-1) **Finish M1 properly**: DPI + multi-monitor metadata
-   - Implement `/env` with real monitor list, per-monitor DPI/scale (as available)
-   - Ensure `/capture` returns `scale/dpi` matching the captured monitor
-   - Provide repeatable validation steps for 100%/125%/175%
-2) **M2 input endpoints**
-   - `/input/mouse`, `/input/key`
-   - Locked → 409; UAC/safe desktop → explicit error (e.g., 412)
-   - Optional: before/after screenshots behind config flags
-3) **M3 macro + evidence bundle**
-   - `/macro/run`
-   - run bundle export (JSONL + images, optional zip)
+### Completed
+- Implemented `GET /env` to return per-monitor bounds + DPI/scale (Windows only):
+  - Added `virtualScreenRectPx`
+  - Per display: `boundsRectPx`, `workAreaRectPx`, and `dpi/scale` objects
+- Updated `/capture` + `/capture/selfcheck` metadata so `scale`/`dpi` match the captured monitor:
+  - window/region: monitor containing capture rect center
+  - screen: respects `displayIndex` (else primary)
+- `mode=screen` now captures a single monitor (primary by default) instead of the entire virtual desktop.
 
-### How to test (today)
-- Build/run on Windows:
-  - `dotnet build`
-  - run tray app, then call:
-    - `GET /health`
-    - `GET /config`
-    - `POST /window/list`
-    - `POST /capture` (screen/window/region)
+### How to test (2026-02-05)
+1) On Windows 11 with 2 monitors at different scaling (e.g., 100% and 175%):
+   - Start the tray app.
+   - Call `GET /env` and note `displays[i].scale.x` / `displays[i].dpi.x`.
+2) Screen capture primary:
+   - `POST /capture` with `{ "mode": "screen" }`
+   - Verify `data.scale/data.dpi` match the primary monitor from `/env`.
+3) Screen capture by index:
+   - `POST /capture` with `{ "mode": "screen", "displayIndex": 1 }`
+   - Verify `data.scale/data.dpi` match `/env.displays[1]`.
+4) Window capture across monitors:
+   - Move Notepad between monitors and run `POST /capture` with `{ "mode": "window", "window": { "processName": "notepad" } }`
+   - Verify `scale/dpi` follow the monitor containing the window center.
+5) Region capture across monitors:
+   - Choose a region whose center lies on each monitor and call `mode=region`.
+   - Verify `scale/dpi` match the monitor containing that region center.
 
 ### Notes / Risks
 - DPI correctness is the foundation; do it before input.
-- Multi-monitor DPI can differ; per-monitor DPI awareness must be verified on Win11.
+- Multi-monitor DPI can differ.
+- Per-monitor DPI uses `GetDpiForMonitor(MDT_EFFECTIVE_DPI)` (Win 8.1+). Fallback may return system DPI depending on process DPI awareness.
+
+### Next
+- Validate per-monitor DPI awareness is enabled at process startup.
+- Consider returning `displayIndex/deviceName` in capture response for easier debugging.
+- M2 input endpoints (`/input/mouse`, `/input/key`).
