@@ -54,4 +54,68 @@
 ### Next
 - Validate per-monitor DPI awareness is enabled at process startup.
 - Consider returning `displayIndex/deviceName` in capture response for easier debugging.
-- M2 input endpoints (`/input/mouse`, `/input/key`).
+- M2 input endpoints (`/input/key`).
+
+---
+
+## 2026-02-05 (Update 2)
+
+### Completed
+- Implemented `POST /input/mouse` endpoint with full mouse input support:
+  - **Operations**: `move`, `click`, `double`, `right`, `wheel`, `drag`
+  - **Coordinate system**: Physical pixels in virtual screen space (handles negative origins)
+  - **SendInput**: Uses `MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK` for cross-monitor support
+  - **Humanization**: Optional `jitterPx` and `delayMs` for human-like input
+  - **Error handling**: Returns 412 `UAC_REQUIRED` when blocked by secure desktop
+- Updated API documentation with full `/input/mouse` specification and curl examples
+
+### How to test (POST /input/mouse)
+
+1) Start the tray app on Windows 11.
+
+2) Move cursor:
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"move","x":500,"y":300}'
+```
+
+3) Left click (open Start menu area):
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"click","x":50,"y":1050}'
+```
+
+4) Right click (context menu):
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"right","x":500,"y":500}'
+```
+
+5) Scroll wheel:
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"wheel","x":500,"y":500,"dy":-360}'
+```
+
+6) Drag (draw selection box on desktop):
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"drag","x":100,"y":100,"x2":400,"y2":400}'
+```
+
+7) Test locked workstation (Win+L, then try any input):
+   - Expected: 409 LOCKED response
+
+8) Multi-monitor test (if available):
+   - Use `GET /env` to find secondary monitor coordinates
+   - Click on secondary monitor using its physical pixel coordinates
