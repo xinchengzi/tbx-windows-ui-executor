@@ -117,6 +117,12 @@ public sealed class ApiHost : IDisposable
             ? new WindowsKeyInputProvider()
             : new NullKeyInputProvider();
 
+        var macroRunner = new MacroRunner(
+            windowManager,
+            captureProvider,
+            mouseInputProvider,
+            keyInputProvider);
+
         // Middleware: lock state guard
         app.Use(async (ctx, next) =>
         {
@@ -137,37 +143,6 @@ public sealed class ApiHost : IDisposable
             }
 
             await next();
-        });
-
-        // Middleware: run concurrency guard (single-run at a time)
-        app.Use(async (ctx, next) =>
-        {
-            var path = ctx.Request.Path;
-            var needsGuard = path.StartsWithSegments("/macro/run")
-                || path.StartsWithSegments("/input");
-
-            if (!needsGuard)
-            {
-                await next();
-                return;
-            }
-
-            if (!RunGuard.Instance.TryAcquire())
-            {
-                ctx.Response.StatusCode = 429;
-                await Results.Json(ApiResponse.Error(ctx, 429, "BUSY"))
-                    .ExecuteAsync(ctx);
-                return;
-            }
-
-            try
-            {
-                await next();
-            }
-            finally
-            {
-                RunGuard.Instance.Release();
-            }
         });
 
         // Routes
@@ -470,41 +445,33 @@ public sealed class ApiHost : IDisposable
                 return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
             }
 
-            if (payload?.Steps is null || payload.Steps.Length == 0)
+            if (payload is null)
             {
                 return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
             }
 
-            var executed = 0;
-            foreach (var step in payload.Steps)
+            var runId = (string?)ctx.Items["runId"] ?? Guid.NewGuid().ToString("n");
+            var result = macroRunner.Execute(payload, runId);
+
+            if (!result.Ok)
             {
-                if (step.DelayMs > 0)
+                var statusCode = result.Status ?? 500;
+                return Results.Json(new
                 {
-                    await System.Threading.Tasks.Task.Delay(step.DelayMs);
-                }
-
-                if (step.Mouse is not null)
-                {
-                    var result = mouseInputProvider.Execute(step.Mouse);
-                    if (!result.Ok)
-                    {
-                        return Results.Json(ApiResponse.Error(ctx, result.StatusCode ?? 500, result.Error ?? "MOUSE_FAILED"));
-                    }
-                }
-
-                if (step.Key is not null)
-                {
-                    var result = keyInputProvider.Execute(step.Key);
-                    if (!result.Ok)
-                    {
-                        return Results.Json(ApiResponse.Error(ctx, result.StatusCode ?? 500, result.Error ?? "KEY_FAILED"));
-                    }
-                }
-
-                executed++;
+                    runId = result.RunId,
+                    ok = false,
+                    status = statusCode,
+                    error = result.Error,
+                    steps = result.Steps
+                });
             }
 
-            return Results.Json(ApiResponse.Ok(ctx, new { success = true, stepsExecuted = executed }));
+            return Results.Json(new
+            {
+                runId = result.RunId,
+                ok = true,
+                steps = result.Steps
+            });
         });
 
         _app = app;
@@ -563,10 +530,3 @@ public sealed record CaptureWindowMatch(
     string? ProcessName);
 
 public sealed record CaptureRegion(int X, int Y, int W, int H);
-
-public sealed record MacroRunRequest(MacroStep[]? Steps);
-
-public sealed record MacroStep(
-    int DelayMs,
-    MouseInputRequest? Mouse,
-    KeyInputRequest? Key);
