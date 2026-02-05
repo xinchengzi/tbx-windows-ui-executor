@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace TbxExecutor;
@@ -8,13 +9,11 @@ public sealed class WindowsDisplayEnvironmentProvider : IDisplayEnvironmentProvi
 {
     public IReadOnlyList<DisplayInfo> GetDisplays()
     {
-        var list = new List<DisplayInfo>();
+        var list = new List<(IntPtr Handle, string DeviceName, bool IsPrimary, RectPx Bounds, RectPx Work, int DpiX, int DpiY)>();
 
         // Enumerate monitors
-        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (hMonitor, hdc, ref RECT lprc, IntPtr data) =>
+        _ = EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (hMonitor, _, ref RECT _, IntPtr _) =>
         {
-            var index = list.Count;
-
             var mi = new MONITORINFOEX();
             mi.cbSize = Marshal.SizeOf<MONITORINFOEX>();
 
@@ -38,24 +37,37 @@ public sealed class WindowsDisplayEnvironmentProvider : IDisplayEnvironmentProvi
                 dpiY = fallback.dpiY;
             }
 
-            var scaleX = dpiX / 96.0;
-            var scaleY = dpiY / 96.0;
-
-            list.Add(new DisplayInfo(
-                Index: index,
-                DeviceName: deviceName,
-                IsPrimary: isPrimary,
-                BoundsRectPx: bounds,
-                WorkAreaRectPx: work,
-                DpiX: dpiX,
-                DpiY: dpiY,
-                ScaleX: scaleX,
-                ScaleY: scaleY));
-
+            list.Add((hMonitor, deviceName, isPrimary, bounds, work, dpiX, dpiY));
             return true;
         }, IntPtr.Zero);
 
-        return list;
+        // Stable ordering: primary first, then top-left to bottom-right.
+        var ordered = list
+            .OrderByDescending(d => d.IsPrimary)
+            .ThenBy(d => d.Bounds.X)
+            .ThenBy(d => d.Bounds.Y)
+            .ToList();
+
+        var result = new List<DisplayInfo>(ordered.Count);
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var d = ordered[i];
+            var scaleX = d.DpiX / 96.0;
+            var scaleY = d.DpiY / 96.0;
+
+            result.Add(new DisplayInfo(
+                Index: i,
+                DeviceName: d.DeviceName,
+                IsPrimary: d.IsPrimary,
+                BoundsRectPx: d.Bounds,
+                WorkAreaRectPx: d.Work,
+                DpiX: d.DpiX,
+                DpiY: d.DpiY,
+                ScaleX: scaleX,
+                ScaleY: scaleY));
+        }
+
+        return result;
     }
 
     public RectPx GetVirtualScreenRectPx()
@@ -105,7 +117,7 @@ public sealed class WindowsDisplayEnvironmentProvider : IDisplayEnvironmentProvi
                 }
                 finally
                 {
-                    DeleteDC(hdc);
+                    _ = DeleteDC(hdc);
                 }
             }
         }
