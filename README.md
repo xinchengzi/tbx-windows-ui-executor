@@ -1,5 +1,14 @@
 # tbx-windows-ui-executor
 
-Windows tray Executor: exposes screenshot + window + input primitives over tailnet (HTTP + Bearer token).
+Windows 11 **tray** Executor: exposes **screenshot + window + input** primitives over **tailnet** (HTTP + Bearer token).
 
-Spec: ../.openclaw/workspace/docs/tbx-windows-executor-spec.md (also copied into this repo under docs/).
+- Controller: `mf-kvm01 (100.64.0.1)`
+- Executor: runs on `yc-tbx` (Win11)
+
+## Docs
+- Spec: `docs/spec.md`
+- Build: `docs/build.md`
+- API: `docs/api.md`
+
+## Status
+M1 skeleton in progress.
