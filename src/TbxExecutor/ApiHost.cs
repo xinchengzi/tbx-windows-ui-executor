@@ -110,6 +110,9 @@ public sealed class ApiHost : IDisposable
         var captureProvider = OperatingSystem.IsWindows()
             ? new WindowsCaptureProvider(displayEnvProvider)
             : new NullCaptureProvider();
+        var mouseInputProvider = OperatingSystem.IsWindows()
+            ? new WindowsMouseInputProvider()
+            : new NullMouseInputProvider();
 
         // Middleware: lock state guard
         app.Use(async (ctx, next) =>
@@ -345,6 +348,38 @@ public sealed class ApiHost : IDisposable
                 scale = result.Metadata.Scale,
                 dpi = result.Metadata.Dpi
             }));
+        });
+
+        app.MapPost("/input/mouse", async (HttpContext ctx) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            }
+
+            MouseInputRequest? payload;
+            try
+            {
+                payload = await ctx.Request.ReadFromJsonAsync<MouseInputRequest>();
+            }
+            catch
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            if (payload is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            var result = mouseInputProvider.Execute(payload);
+            if (!result.Ok)
+            {
+                var statusCode = result.StatusCode ?? 500;
+                return Results.Json(ApiResponse.Error(ctx, statusCode, result.Error ?? "UNKNOWN_ERROR"));
+            }
+
+            return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
         });
 
         _app = app;

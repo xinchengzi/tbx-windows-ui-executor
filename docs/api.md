@@ -69,6 +69,143 @@ When the workstation is locked, returns `409 LOCKED`.
 ## POST /input/*
 Refused with `409 LOCKED` when the workstation is locked.
 
+## POST /input/mouse
+
+Performs mouse input operations using SendInput. Coordinates are physical pixels in virtual screen space.
+
+### Request
+
+```json
+{
+  "kind": "move" | "click" | "double" | "right" | "wheel" | "drag",
+  "x": 500,
+  "y": 300,
+  "button": "left" | "right" | "middle",
+  "dx": 0,
+  "dy": -120,
+  "x2": 800,
+  "y2": 600,
+  "humanize": {
+    "jitterPx": 2,
+    "delayMs": [10, 50]
+  }
+}
+```
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `kind` | string | **Yes** | Operation type: `move`, `click`, `double`, `right`, `wheel`, `drag` |
+| `x` | int | Depends | X coordinate (physical pixels). Required for `move`, `click`, `double`, `right`, `drag`. Optional for `wheel`. |
+| `y` | int | Depends | Y coordinate (physical pixels). Required for `move`, `click`, `double`, `right`, `drag`. Optional for `wheel`. |
+| `button` | string | No | Mouse button: `left` (default), `right`, `middle`. Used by `click`/`double`. |
+| `dx` | int | No | Horizontal wheel delta. For `wheel` only. Default: 0. |
+| `dy` | int | No | Vertical wheel delta. For `wheel` only. Default: -120 (scroll down). |
+| `x2` | int | When kind=drag | End X coordinate for drag operation. |
+| `y2` | int | When kind=drag | End Y coordinate for drag operation. |
+| `humanize` | object | No | Adds human-like randomness to input. |
+| `humanize.jitterPx` | int | No | Random offset in pixels applied to coordinates. |
+| `humanize.delayMs` | [int, int] | No | Random delay range [min, max] in milliseconds between actions. |
+
+### Operation Types
+
+| Kind | Description |
+|------|-------------|
+| `move` | Move cursor to (x, y) |
+| `click` | Move to (x, y), then left-click (or button specified) |
+| `double` | Move to (x, y), then double-click |
+| `right` | Move to (x, y), then right-click |
+| `wheel` | Scroll wheel at current position (or move to x,y first if provided). dy=-120 scrolls down, dy=120 scrolls up. |
+| `drag` | Mouse down at (x, y), move to (x2, y2), mouse up |
+
+### Response
+
+```json
+{
+  "runId": "abc123",
+  "stepId": "def456",
+  "ok": true,
+  "data": {
+    "success": true
+  }
+}
+```
+
+### Errors
+
+| Status | Error Code | Description |
+|--------|------------|-------------|
+| 400 | `BAD_REQUEST` | Invalid JSON, missing required fields, or unknown kind |
+| 409 | `LOCKED` | Workstation is locked |
+| 412 | `UAC_REQUIRED` | Input blocked by UAC/secure desktop |
+| 500 | `INPUT_FAILED` | SendInput failed |
+| 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
+
+### Coordinate System
+
+- Coordinates are **physical pixels** in **virtual screen** space.
+- Virtual screen origin can be negative (e.g., secondary monitor to the left of primary).
+- Use `GET /env` to retrieve virtual screen bounds and per-monitor coordinates.
+
+### Examples
+
+#### Move cursor
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"move","x":500,"y":300}'
+```
+
+#### Left click
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"click","x":500,"y":300}'
+```
+
+#### Right click
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"right","x":500,"y":300}'
+```
+
+#### Double click
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"double","x":500,"y":300}'
+```
+
+#### Scroll down at position
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"wheel","x":500,"y":300,"dy":-120}'
+```
+
+#### Drag from (100,100) to (500,500)
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"drag","x":100,"y":100,"x2":500,"y2":500}'
+```
+
+#### Click with humanization
+```bash
+curl -X POST http://100.115.92.6:17890/input/mouse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"click","x":500,"y":300,"humanize":{"jitterPx":2,"delayMs":[10,50]}}'
+```
+
 ## POST /macro/*
 Refused with `409 LOCKED` when the workstation is locked.
 
