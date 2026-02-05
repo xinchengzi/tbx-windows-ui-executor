@@ -12,7 +12,7 @@ public sealed class WindowsDisplayEnvironmentProvider : IDisplayEnvironmentProvi
         var list = new List<(IntPtr Handle, string DeviceName, bool IsPrimary, RectPx Bounds, RectPx Work, int DpiX, int DpiY)>();
 
         // Enumerate monitors
-        _ = EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (hMonitor, _, ref RECT _, IntPtr _) =>
+        _ = EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMonitor, IntPtr hdc, ref RECT lprc, IntPtr data) =>
         {
             var mi = new MONITORINFOEX();
             mi.cbSize = Marshal.SizeOf<MONITORINFOEX>();

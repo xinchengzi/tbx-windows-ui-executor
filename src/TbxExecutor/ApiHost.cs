@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -101,22 +102,22 @@ public sealed class ApiHost : IDisposable
             await next();
         });
 
-        var windowManager = OperatingSystem.IsWindows()
+        IWindowManager windowManager = OperatingSystem.IsWindows()
             ? new WindowsWindowManager()
             : new NullWindowManager();
-        var lockStateProvider = OperatingSystem.IsWindows()
+        ILockStateProvider lockStateProvider = OperatingSystem.IsWindows()
             ? new WindowsLockStateProvider()
             : new NullLockStateProvider();
-        var displayEnvProvider = OperatingSystem.IsWindows()
+        IDisplayEnvironmentProvider displayEnvProvider = OperatingSystem.IsWindows()
             ? new WindowsDisplayEnvironmentProvider()
             : new NullDisplayEnvironmentProvider();
-        var captureProvider = OperatingSystem.IsWindows()
+        ICaptureProvider captureProvider = OperatingSystem.IsWindows()
             ? new WindowsCaptureProvider(displayEnvProvider)
             : new NullCaptureProvider();
-        var mouseInputProvider = OperatingSystem.IsWindows()
+        IMouseInputProvider mouseInputProvider = OperatingSystem.IsWindows()
             ? new WindowsMouseInputProvider()
             : new NullMouseInputProvider();
-        var keyInputProvider = OperatingSystem.IsWindows()
+        IKeyInputProvider keyInputProvider = OperatingSystem.IsWindows()
             ? new WindowsKeyInputProvider()
             : new NullKeyInputProvider();
 

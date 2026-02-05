@@ -1,6 +1,5 @@
 using System;
 using System.Drawing;
-using System.Windows;
 using System.Windows.Forms;
 
 namespace TbxExecutor;
@@ -39,14 +38,14 @@ public sealed class TrayHost : IDisposable
         {
             var host = _config.PickListenHost();
             var text = $"http://{host}:{_config.ListenPort}";
-            Clipboard.SetText(text);
+            System.Windows.Forms.Clipboard.SetText(text);
             UpdateStatus("Endpoint copied");
         };
 
         var copyToken = new ToolStripMenuItem("Copy token");
         copyToken.Click += (_, _) =>
         {
-            Clipboard.SetText(_config.Token);
+            System.Windows.Forms.Clipboard.SetText(_config.Token);
             UpdateStatus("Token copied");
         };
 
