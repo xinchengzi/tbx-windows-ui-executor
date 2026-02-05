@@ -34,11 +34,11 @@ public sealed class ApiHost : IDisposable
             o.TimestampFormat = "HH:mm:ss ";
         });
 
+        var listenHost = _config.PickListenHost();
         builder.WebHost.ConfigureKestrel(o =>
         {
             // Bind only to configured host/port.
-            // Note: ListenHost defaults to 0.0.0.0; user should set it to tailnet IP.
-            o.Listen(IPAddress.Parse(_config.ListenHost), _config.ListenPort);
+            o.Listen(IPAddress.Parse(listenHost), _config.ListenPort);
         });
 
         var app = builder.Build();
@@ -105,6 +105,9 @@ public sealed class ApiHost : IDisposable
         var lockStateProvider = OperatingSystem.IsWindows()
             ? new WindowsLockStateProvider()
             : new NullLockStateProvider();
+        var captureProvider = OperatingSystem.IsWindows()
+            ? new WindowsCaptureProvider()
+            : new NullCaptureProvider();
 
         // Middleware: lock state guard
         app.Use(async (ctx, next) =>
@@ -153,6 +156,18 @@ public sealed class ApiHost : IDisposable
             return Results.Json(ApiResponse.Ok(ctx, payload));
         });
 
+        app.MapGet("/config", (HttpContext ctx) =>
+        {
+            var payload = new
+            {
+                listenHost = listenHost,
+                listenPort = _config.ListenPort,
+                allowlistIps = _config.AllowlistIps,
+                tokenSet = !string.IsNullOrWhiteSpace(_config.Token)
+            };
+            return Results.Json(ApiResponse.Ok(ctx, payload));
+        });
+
         app.MapPost("/window/list", (HttpContext ctx) =>
         {
             var windows = windowManager.ListWindows();
@@ -186,9 +201,131 @@ public sealed class ApiHost : IDisposable
             return Results.Json(ApiResponse.Ok(ctx, focused));
         });
 
-        app.MapPost("/capture", (HttpContext ctx) =>
+        app.MapPost("/capture", async (HttpContext ctx) =>
         {
-            return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            }
+
+            CaptureApiRequest? payload;
+            try
+            {
+                payload = await ctx.Request.ReadFromJsonAsync<CaptureApiRequest>();
+            }
+            catch
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            if (payload is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
+            }
+
+            var mode = payload.Mode?.ToLowerInvariant() switch
+            {
+                "screen" => CaptureMode.Screen,
+                "window" => CaptureMode.Window,
+                "region" => CaptureMode.Region,
+                _ => CaptureMode.Screen
+            };
+
+            var format = payload.Format?.ToLowerInvariant() switch
+            {
+                "jpeg" or "jpg" => CaptureFormat.Jpeg,
+                _ => CaptureFormat.Png
+            };
+
+            WindowMatch? windowMatch = null;
+            if (payload.Window is not null)
+            {
+                windowMatch = new WindowMatch(
+                    payload.Window.TitleContains,
+                    payload.Window.TitleRegex,
+                    payload.Window.ProcessName);
+            }
+
+            RectPx? region = null;
+            if (payload.Region is not null)
+            {
+                region = new RectPx(
+                    payload.Region.X,
+                    payload.Region.Y,
+                    payload.Region.W,
+                    payload.Region.H);
+            }
+
+            var request = new CaptureRequest(
+                Mode: mode,
+                Window: windowMatch,
+                Region: region,
+                Format: format,
+                Quality: payload.Quality ?? 90,
+                DisplayIndex: payload.DisplayIndex);
+
+            var result = captureProvider.Capture(request, windowManager);
+            if (result is null)
+            {
+                return Results.Json(ApiResponse.Error(ctx, 404, "CAPTURE_FAILED"));
+            }
+
+            var responseData = new
+            {
+                imageB64 = Convert.ToBase64String(result.ImageBytes),
+                format = result.Format == CaptureFormat.Png ? "png" : "jpeg",
+                regionRectPx = new { x = result.Metadata.RegionRectPx.X, y = result.Metadata.RegionRectPx.Y, w = result.Metadata.RegionRectPx.W, h = result.Metadata.RegionRectPx.H },
+                windowRectPx = result.Metadata.WindowRectPx is not null
+                    ? new { x = result.Metadata.WindowRectPx.X, y = result.Metadata.WindowRectPx.Y, w = result.Metadata.WindowRectPx.W, h = result.Metadata.WindowRectPx.H }
+                    : null,
+                ts = result.Metadata.Ts,
+                scale = result.Metadata.Scale,
+                dpi = result.Metadata.Dpi
+            };
+
+            return Results.Json(ApiResponse.Ok(ctx, responseData));
+        });
+
+        app.MapGet("/capture/selfcheck", (HttpContext ctx) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Ok(ctx, new
+                {
+                    ok = false,
+                    reason = "NOT_WINDOWS",
+                    captureAvailable = false
+                }));
+            }
+
+            var request = new CaptureRequest(
+                Mode: CaptureMode.Screen,
+                Window: null,
+                Region: null,
+                Format: CaptureFormat.Png,
+                Quality: 90,
+                DisplayIndex: null);
+
+            var result = captureProvider.Capture(request, windowManager);
+            if (result is null)
+            {
+                return Results.Json(ApiResponse.Ok(ctx, new
+                {
+                    ok = false,
+                    reason = "CAPTURE_FAILED",
+                    captureAvailable = false
+                }));
+            }
+
+            return Results.Json(ApiResponse.Ok(ctx, new
+            {
+                ok = true,
+                captureAvailable = true,
+                testImageSize = result.ImageBytes.Length,
+                testRegionPx = new { w = result.Metadata.RegionRectPx.W, h = result.Metadata.RegionRectPx.H },
+                scale = result.Metadata.Scale,
+                dpi = result.Metadata.Dpi
+            }));
         });
 
         _app = app;
@@ -232,3 +369,18 @@ public static class ApiResponse
         error
     };
 }
+
+public sealed record CaptureApiRequest(
+    string? Mode,
+    CaptureWindowMatch? Window,
+    CaptureRegion? Region,
+    string? Format,
+    int? Quality,
+    int? DisplayIndex);
+
+public sealed record CaptureWindowMatch(
+    string? TitleContains,
+    string? TitleRegex,
+    string? ProcessName);
+
+public sealed record CaptureRegion(int X, int Y, int W, int H);
