@@ -317,6 +317,8 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
     private struct InputUnion
     {
         [FieldOffset(0)]
+        public MOUSEINPUT mi;
+        [FieldOffset(0)]
         public KEYBDINPUT ki;
     }
 
@@ -325,6 +327,18 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
     {
         public ushort wVk;
         public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    // MOUSEINPUT is needed to ensure correct union size
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int dx;
+        public int dy;
+        public uint mouseData;
         public uint dwFlags;
         public uint time;
         public IntPtr dwExtraInfo;
