@@ -15,7 +15,10 @@ public sealed class ApiHost : IDisposable
 {
     private readonly ExecutorConfig _config;
     private readonly RunLogger _runLogger = new();
+    private readonly BusyIndicator _busyIndicator = new();
     private WebApplication? _app;
+
+    public BusyIndicator BusyIndicator => _busyIndicator;
 
     public ApiHost(ExecutorConfig config)
     {
@@ -420,11 +423,13 @@ public sealed class ApiHost : IDisposable
                 return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
             }
 
+            _busyIndicator.FlashBusy(500);
             var result = mouseInputProvider.Execute(payload);
             if (!result.Ok)
             {
                 var statusCode = result.StatusCode ?? 500;
-                return Results.Json(ApiResponse.Error(ctx, statusCode, result.Error ?? "UNKNOWN_ERROR"));
+                var errorData = result.LastError.HasValue ? new { lastError = result.LastError, message = result.Error } : null;
+                return Results.Json(ApiResponse.ErrorWithData(ctx, statusCode, result.Error ?? "UNKNOWN_ERROR", errorData));
             }
 
             return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
@@ -452,11 +457,13 @@ public sealed class ApiHost : IDisposable
                 return Results.Json(ApiResponse.Error(ctx, 400, "BAD_REQUEST"));
             }
 
+            _busyIndicator.FlashBusy(500);
             var result = keyInputProvider.Execute(payload);
             if (!result.Ok)
             {
                 var statusCode = result.StatusCode ?? 500;
-                return Results.Json(ApiResponse.Error(ctx, statusCode, result.Error ?? "UNKNOWN_ERROR"));
+                var errorData = result.LastError.HasValue ? new { lastError = result.LastError, message = result.Error } : null;
+                return Results.Json(ApiResponse.ErrorWithData(ctx, statusCode, result.Error ?? "UNKNOWN_ERROR", errorData));
             }
 
             return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
@@ -492,7 +499,16 @@ public sealed class ApiHost : IDisposable
                 mouseInputProvider,
                 keyInputProvider);
 
-            var result = runner.Execute(payload, runId);
+            _busyIndicator.EnterMacro();
+            MacroRunResult result;
+            try
+            {
+                result = runner.Execute(payload, runId);
+            }
+            finally
+            {
+                _busyIndicator.ExitMacro();
+            }
 
             foreach (var step in result.Steps)
             {
@@ -582,6 +598,7 @@ public sealed class ApiHost : IDisposable
         try { _app.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
         _app = null;
         _runLogger.Dispose();
+        _busyIndicator.Dispose();
     }
 
     private static bool TimingSafeEquals(string a, string b)

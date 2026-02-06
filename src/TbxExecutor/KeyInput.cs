@@ -17,7 +17,7 @@ public interface IKeyInputProvider
     KeyInputResult Execute(KeyInputRequest request);
 }
 
-public sealed record KeyInputResult(bool Ok, string? Error = null, int? StatusCode = null);
+public sealed record KeyInputResult(bool Ok, string? Error = null, int? StatusCode = null, int? LastError = null);
 
 public sealed class NullKeyInputProvider : IKeyInputProvider
 {
@@ -28,50 +28,50 @@ public sealed class NullKeyInputProvider : IKeyInputProvider
 public sealed class WindowsKeyInputProvider : IKeyInputProvider
 {
     private readonly Random _random = new();
+    private int _lastWin32Error;
 
-    // Virtual key code mappings
-    private static readonly Dictionary<string, ushort> VkCodes = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, (ushort vk, ushort scan, bool extended)> KeyMappings = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Modifier keys
-        ["CTRL"] = 0x11,       // VK_CONTROL
-        ["ALT"] = 0x12,        // VK_MENU
-        ["SHIFT"] = 0x10,      // VK_SHIFT
-        ["WIN"] = 0x5B,        // VK_LWIN
+        ["CTRL"] = (0x11, 0x1D, false),
+        ["ALT"] = (0x12, 0x38, false),
+        ["SHIFT"] = (0x10, 0x2A, false),
+        ["WIN"] = (0x5B, 0x5B, true),
 
-        // Special keys
-        ["ENTER"] = 0x0D,      // VK_RETURN
-        ["ESC"] = 0x1B,        // VK_ESCAPE
-        ["TAB"] = 0x09,        // VK_TAB
-        ["BACKSPACE"] = 0x08,  // VK_BACK
-        ["DELETE"] = 0x2E,     // VK_DELETE
-        ["HOME"] = 0x24,       // VK_HOME
-        ["END"] = 0x23,        // VK_END
-        ["PAGEUP"] = 0x21,     // VK_PRIOR
-        ["PAGEDOWN"] = 0x22,   // VK_NEXT
-        ["SPACE"] = 0x20,      // VK_SPACE
+        ["ENTER"] = (0x0D, 0x1C, false),
+        ["ESC"] = (0x1B, 0x01, false),
+        ["TAB"] = (0x09, 0x0F, false),
+        ["BACKSPACE"] = (0x08, 0x0E, false),
+        ["DELETE"] = (0x2E, 0x53, true),
+        ["HOME"] = (0x24, 0x47, true),
+        ["END"] = (0x23, 0x4F, true),
+        ["PAGEUP"] = (0x21, 0x49, true),
+        ["PAGEDOWN"] = (0x22, 0x51, true),
+        ["SPACE"] = (0x20, 0x39, false),
 
-        // Arrow keys
-        ["UP"] = 0x26,         // VK_UP
-        ["DOWN"] = 0x28,       // VK_DOWN
-        ["LEFT"] = 0x25,       // VK_LEFT
-        ["RIGHT"] = 0x27,      // VK_RIGHT
+        ["UP"] = (0x26, 0x48, true),
+        ["DOWN"] = (0x28, 0x50, true),
+        ["LEFT"] = (0x25, 0x4B, true),
+        ["RIGHT"] = (0x27, 0x4D, true),
 
-        // Letters A-Z (0x41-0x5A)
-        ["A"] = 0x41, ["B"] = 0x42, ["C"] = 0x43, ["D"] = 0x44, ["E"] = 0x45,
-        ["F"] = 0x46, ["G"] = 0x47, ["H"] = 0x48, ["I"] = 0x49, ["J"] = 0x4A,
-        ["K"] = 0x4B, ["L"] = 0x4C, ["M"] = 0x4D, ["N"] = 0x4E, ["O"] = 0x4F,
-        ["P"] = 0x50, ["Q"] = 0x51, ["R"] = 0x52, ["S"] = 0x53, ["T"] = 0x54,
-        ["U"] = 0x55, ["V"] = 0x56, ["W"] = 0x57, ["X"] = 0x58, ["Y"] = 0x59,
-        ["Z"] = 0x5A,
+        ["A"] = (0x41, 0x1E, false), ["B"] = (0x42, 0x30, false), ["C"] = (0x43, 0x2E, false),
+        ["D"] = (0x44, 0x20, false), ["E"] = (0x45, 0x12, false), ["F"] = (0x46, 0x21, false),
+        ["G"] = (0x47, 0x22, false), ["H"] = (0x48, 0x23, false), ["I"] = (0x49, 0x17, false),
+        ["J"] = (0x4A, 0x24, false), ["K"] = (0x4B, 0x25, false), ["L"] = (0x4C, 0x26, false),
+        ["M"] = (0x4D, 0x32, false), ["N"] = (0x4E, 0x31, false), ["O"] = (0x4F, 0x18, false),
+        ["P"] = (0x50, 0x19, false), ["Q"] = (0x51, 0x10, false), ["R"] = (0x52, 0x13, false),
+        ["S"] = (0x53, 0x1F, false), ["T"] = (0x54, 0x14, false), ["U"] = (0x55, 0x16, false),
+        ["V"] = (0x56, 0x2F, false), ["W"] = (0x57, 0x11, false), ["X"] = (0x58, 0x2D, false),
+        ["Y"] = (0x59, 0x15, false), ["Z"] = (0x5A, 0x2C, false),
 
-        // Numbers 0-9 (0x30-0x39)
-        ["0"] = 0x30, ["1"] = 0x31, ["2"] = 0x32, ["3"] = 0x33, ["4"] = 0x34,
-        ["5"] = 0x35, ["6"] = 0x36, ["7"] = 0x37, ["8"] = 0x38, ["9"] = 0x39,
+        ["0"] = (0x30, 0x0B, false), ["1"] = (0x31, 0x02, false), ["2"] = (0x32, 0x03, false),
+        ["3"] = (0x33, 0x04, false), ["4"] = (0x34, 0x05, false), ["5"] = (0x35, 0x06, false),
+        ["6"] = (0x36, 0x07, false), ["7"] = (0x37, 0x08, false), ["8"] = (0x38, 0x09, false),
+        ["9"] = (0x39, 0x0A, false),
 
-        // Function keys F1-F12 (0x70-0x7B)
-        ["F1"] = 0x70, ["F2"] = 0x71, ["F3"] = 0x72, ["F4"] = 0x73,
-        ["F5"] = 0x74, ["F6"] = 0x75, ["F7"] = 0x76, ["F8"] = 0x77,
-        ["F9"] = 0x78, ["F10"] = 0x79, ["F11"] = 0x7A, ["F12"] = 0x7B,
+        ["F1"] = (0x70, 0x3B, false), ["F2"] = (0x71, 0x3C, false), ["F3"] = (0x72, 0x3D, false),
+        ["F4"] = (0x73, 0x3E, false), ["F5"] = (0x74, 0x3F, false), ["F6"] = (0x75, 0x40, false),
+        ["F7"] = (0x76, 0x41, false), ["F8"] = (0x77, 0x42, false), ["F9"] = (0x78, 0x43, false),
+        ["F10"] = (0x79, 0x44, false), ["F11"] = (0x7A, 0x57, false), ["F12"] = (0x7B, 0x58, false),
     };
 
     public KeyInputResult Execute(KeyInputRequest request)
@@ -93,8 +93,7 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
             return new(false, "BAD_REQUEST: keys array is required and must not be empty", 400);
         }
 
-        // Validate all keys first
-        var vkCodes = new List<ushort>();
+        var keyInfos = new List<(ushort vk, ushort scan, bool extended, string name)>();
         foreach (var key in request.Keys)
         {
             if (string.IsNullOrWhiteSpace(key))
@@ -102,17 +101,17 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
                 return new(false, "BAD_REQUEST: key name cannot be empty", 400);
             }
 
-            if (!VkCodes.TryGetValue(key.Trim(), out var vk))
+            if (!KeyMappings.TryGetValue(key.Trim(), out var mapping))
             {
                 return new(false, $"BAD_REQUEST: unknown key '{key}'", 400);
             }
 
-            vkCodes.Add(vk);
+            keyInfos.Add((mapping.vk, mapping.scan, mapping.extended, key.Trim().ToUpperInvariant()));
         }
 
         try
         {
-            return DoPress(vkCodes, request.Humanize);
+            return DoPress(keyInfos, request.Humanize);
         }
         catch (UacRequiredException)
         {
@@ -120,29 +119,26 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
         }
     }
 
-    private KeyInputResult DoPress(List<ushort> vkCodes, KeyHumanize? humanize)
+    private KeyInputResult DoPress(List<(ushort vk, ushort scan, bool extended, string name)> keys, KeyHumanize? humanize)
     {
-        // Press: key down in order, then key up in reverse order
-
-        // Key down events
-        foreach (var vk in vkCodes)
+        foreach (var key in keys)
         {
             ApplyHumanizeDelay(humanize);
 
-            if (!SendKeyDown(vk))
+            if (!SendKeyDown(key.vk, key.scan, key.extended))
             {
-                return new(false, "INPUT_FAILED", 500);
+                return new(false, $"INPUT_FAILED: keydown {key.name} (vk=0x{key.vk:X2}, scan=0x{key.scan:X2})", 500, _lastWin32Error);
             }
         }
 
-        // Key up events in reverse order
-        for (var i = vkCodes.Count - 1; i >= 0; i--)
+        for (var i = keys.Count - 1; i >= 0; i--)
         {
+            var key = keys[i];
             ApplyHumanizeDelay(humanize);
 
-            if (!SendKeyUp(vkCodes[i]))
+            if (!SendKeyUp(key.vk, key.scan, key.extended))
             {
-                return new(false, "INPUT_FAILED", 500);
+                return new(false, $"INPUT_FAILED: keyup {key.name} (vk=0x{key.vk:X2}, scan=0x{key.scan:X2})", 500, _lastWin32Error);
             }
         }
 
@@ -163,8 +159,11 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
         }
     }
 
-    private bool SendKeyDown(ushort vk)
+    private bool SendKeyDown(ushort vk, ushort scan, bool extended)
     {
+        uint flags = KEYEVENTF_SCANCODE;
+        if (extended) flags |= KEYEVENTF_EXTENDEDKEY;
+
         var input = new INPUT
         {
             type = INPUT_KEYBOARD,
@@ -173,8 +172,8 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
                 ki = new KEYBDINPUT
                 {
                     wVk = vk,
-                    wScan = 0,
-                    dwFlags = 0, // KEYEVENTF_KEYDOWN = 0
+                    wScan = scan,
+                    dwFlags = flags,
                     time = 0,
                     dwExtraInfo = IntPtr.Zero
                 }
@@ -182,12 +181,19 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
         };
 
         var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
-        if (sent == 0) CheckAndThrowUac();
+        if (sent == 0)
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
         return sent == 1;
     }
 
-    private bool SendKeyUp(ushort vk)
+    private bool SendKeyUp(ushort vk, ushort scan, bool extended)
     {
+        uint flags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
+        if (extended) flags |= KEYEVENTF_EXTENDEDKEY;
+
         var input = new INPUT
         {
             type = INPUT_KEYBOARD,
@@ -196,8 +202,8 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
                 ki = new KEYBDINPUT
                 {
                     wVk = vk,
-                    wScan = 0,
-                    dwFlags = KEYEVENTF_KEYUP,
+                    wScan = scan,
+                    dwFlags = flags,
                     time = 0,
                     dwExtraInfo = IntPtr.Zero
                 }
@@ -205,14 +211,17 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
         };
 
         var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
-        if (sent == 0) CheckAndThrowUac();
+        if (sent == 0)
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
         return sent == 1;
     }
 
-    private static void CheckAndThrowUac()
+    private static void CheckAndThrowUac(int error)
     {
-        var error = Marshal.GetLastWin32Error();
-        if (error == 5) // ERROR_ACCESS_DENIED: UAC/secure desktop
+        if (error == 5)
         {
             throw new UacRequiredException();
         }
@@ -220,6 +229,8 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
 
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_SCANCODE = 0x0008;
+    private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

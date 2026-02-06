@@ -274,6 +274,33 @@ Performs keyboard input operations using SendInput.
 | 500 | `INPUT_FAILED` | SendInput failed |
 | 501 | `NOT_IMPLEMENTED` | Non-Windows platform |
 
+#### Enhanced Error Response (v0.2+)
+
+When `INPUT_FAILED` occurs, the response now includes diagnostic information:
+
+```json
+{
+  "ok": false,
+  "status": 500,
+  "error": "INPUT_FAILED: keydown CTRL (vk=0x11, scan=0x1D)",
+  "data": {
+    "lastError": 5,
+    "message": "INPUT_FAILED: keydown CTRL (vk=0x11, scan=0x1D)"
+  }
+}
+```
+
+Common `lastError` values:
+- `5` (ERROR_ACCESS_DENIED): UIPI blocked input - target window has higher privilege level
+- `0`: No error recorded (check if window has focus)
+
+### Implementation Notes
+
+Keyboard input now uses **scan codes** with `KEYEVENTF_SCANCODE` flag for improved reliability:
+- Extended keys (arrows, Home, End, Delete, etc.) include `KEYEVENTF_EXTENDEDKEY` flag
+- Both virtual key code (`wVk`) and scan code (`wScan`) are sent
+- This improves compatibility with applications that rely on scan codes
+
 ### Examples
 
 #### Press Ctrl+L (focus address bar in browser)
@@ -415,8 +442,31 @@ Executes a sequence of macro steps atomically. Windows only.
 | `window.focus` | Focus a window | `match` (same as `/window/focus`) |
 | `capture` | Capture screen/window/region | Same fields as `/capture` |
 | `input.mouse` | Mouse input (defaults to click) | Same as `/input/mouse`. Use `input.mouse.move`, `input.mouse.click`, etc. for explicit action. |
+| `input.mouse.wheel` | Mouse wheel via input.mouse | `dy` (vertical delta) or `dx` (horizontal delta). Optional: `x`, `y` to move cursor first. |
+| `input.wheel` | Dedicated wheel step | `delta` (wheel amount, e.g. 120 per notch), `horizontal` (bool, default false). Optional: `x`, `y`. |
 | `input.key` | Keyboard input | Same as `/input/key`. Use `input.key.press` for explicit action. |
 | `sleep` | Delay execution | `ms` (milliseconds) |
+
+#### `input.wheel` Step Details
+
+The `input.wheel` step provides a clean interface for mouse wheel operations:
+
+```json
+{
+  "kind": "input.wheel",
+  "x": 500,
+  "y": 300,
+  "delta": -120,
+  "horizontal": false
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `x` | int | No | X coordinate to move cursor to before scrolling |
+| `y` | int | No | Y coordinate to move cursor to before scrolling |
+| `delta` | int | No | Wheel delta (default: -120). Positive = scroll up/right, negative = scroll down/left. Typical: 120 per notch. |
+| `horizontal` | bool | No | If true, sends horizontal wheel (HWHEEL). Default: false (vertical). |
 
 ### Parameters
 

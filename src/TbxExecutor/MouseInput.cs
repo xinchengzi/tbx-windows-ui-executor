@@ -22,7 +22,7 @@ public interface IMouseInputProvider
     MouseInputResult Execute(MouseInputRequest request);
 }
 
-public sealed record MouseInputResult(bool Ok, string? Error = null, int? StatusCode = null);
+public sealed record MouseInputResult(bool Ok, string? Error = null, int? StatusCode = null, int? LastError = null);
 
 public sealed class NullMouseInputProvider : IMouseInputProvider
 {
@@ -33,6 +33,7 @@ public sealed class NullMouseInputProvider : IMouseInputProvider
 public sealed class WindowsMouseInputProvider : IMouseInputProvider
 {
     private readonly Random _random = new();
+    private int _lastWin32Error;
 
     public MouseInputResult Execute(MouseInputRequest request)
     {
@@ -97,7 +98,7 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         var (absX, absY) = PhysicalToAbsolute(x, y, humanize?.JitterPx ?? 0);
         if (!SendMouseMove(absX, absY))
         {
-            return new(false, "INPUT_FAILED", 500);
+            return new(false, $"INPUT_FAILED: move to ({x},{y})", 500, _lastWin32Error);
         }
         return new(true);
     }
@@ -115,7 +116,7 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
 
             if (!SendMouseClick(button))
             {
-                return new(false, "INPUT_FAILED", 500);
+                return new(false, $"INPUT_FAILED: click {button}", 500, _lastWin32Error);
             }
         }
 
@@ -129,13 +130,13 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
             var (absX, absY) = PhysicalToAbsolute(x.Value, y.Value, 0);
             if (!SendMouseMove(absX, absY))
             {
-                return new(false, "INPUT_FAILED", 500);
+                return new(false, $"INPUT_FAILED: wheel move to ({x},{y})", 500, _lastWin32Error);
             }
         }
 
         if (!SendMouseWheel(dx, dy))
         {
-            return new(false, "INPUT_FAILED", 500);
+            return new(false, $"INPUT_FAILED: wheel dx={dx} dy={dy}", 500, _lastWin32Error);
         }
 
         return new(true);
@@ -146,14 +147,14 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         var (absX1, absY1) = PhysicalToAbsolute(x1, y1, humanize?.JitterPx ?? 0);
         if (!SendMouseMove(absX1, absY1))
         {
-            return new(false, "INPUT_FAILED", 500);
+            return new(false, $"INPUT_FAILED: drag move to ({x1},{y1})", 500, _lastWin32Error);
         }
 
         ApplyHumanizeDelay(humanize);
 
         if (!SendMouseDown(MouseButton.Left))
         {
-            return new(false, "INPUT_FAILED", 500);
+            return new(false, "INPUT_FAILED: drag mouse down", 500, _lastWin32Error);
         }
 
         ApplyHumanizeDelay(humanize);
@@ -161,14 +162,14 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         var (absX2, absY2) = PhysicalToAbsolute(x2, y2, humanize?.JitterPx ?? 0);
         if (!SendMouseMove(absX2, absY2))
         {
-            return new(false, "INPUT_FAILED", 500);
+            return new(false, $"INPUT_FAILED: drag move to ({x2},{y2})", 500, _lastWin32Error);
         }
 
         ApplyHumanizeDelay(humanize);
 
         if (!SendMouseUp(MouseButton.Left))
         {
-            return new(false, "INPUT_FAILED", 500);
+            return new(false, "INPUT_FAILED: drag mouse up", 500, _lastWin32Error);
         }
 
         return new(true);
@@ -239,7 +240,11 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         };
 
         var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
-        if (sent == 0) CheckAndThrowUac();
+        if (sent == 0)
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
         return sent == 1;
     }
 
@@ -280,7 +285,11 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         };
 
         var sent = SendInput(2, inputs, Marshal.SizeOf<INPUT>());
-        if (sent == 0) CheckAndThrowUac();
+        if (sent == 0)
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
         return sent == 2;
     }
 
@@ -304,7 +313,11 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         };
 
         var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
-        if (sent == 0) CheckAndThrowUac();
+        if (sent == 0)
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
         return sent == 1;
     }
 
@@ -328,7 +341,11 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         };
 
         var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
-        if (sent == 0) CheckAndThrowUac();
+        if (sent == 0)
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
         return sent == 1;
     }
 
@@ -375,7 +392,11 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
         if (inputs.Count == 0) return true;
 
         var sent = SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf<INPUT>());
-        if (sent == 0) CheckAndThrowUac();
+        if (sent == 0)
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
         return sent == inputs.Count;
     }
 
@@ -387,10 +408,9 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
             _ => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP)
         };
 
-    private static void CheckAndThrowUac()
+    private static void CheckAndThrowUac(int error)
     {
-        var error = Marshal.GetLastWin32Error();
-        if (error == 5) // ERROR_ACCESS_DENIED: UAC/secure desktop
+        if (error == 5)
         {
             throw new UacRequiredException();
         }

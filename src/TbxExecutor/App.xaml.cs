@@ -39,6 +39,11 @@ public partial class App : System.Windows.Application
         _api = new ApiHost(config);
         _tray.UpdateStatus($"Starting API on {listenHost}:{config.ListenPort}");
 
+        _api.BusyIndicator.BusyStateChanged += isBusy =>
+        {
+            Dispatcher.BeginInvoke(() => _tray!.SetBusy(isBusy));
+        };
+
         try
         {
             await _api.StartAsync();

@@ -8,6 +8,8 @@ public sealed class TrayHost : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly ExecutorConfig _config;
+    private readonly Icon _normalIcon;
+    private readonly Icon _busyIcon;
 
     public event EventHandler? ExitRequested;
     public event EventHandler? RotateTokenRequested;
@@ -15,10 +17,13 @@ public sealed class TrayHost : IDisposable
     public TrayHost(ExecutorConfig config)
     {
         _config = config;
+        _normalIcon = SystemIcons.Application;
+        _busyIcon = SystemIcons.Warning;
+        
         _icon = new NotifyIcon
         {
             Text = "TbxExecutor",
-            Icon = SystemIcons.Application,
+            Icon = _normalIcon,
             Visible = true,
             ContextMenuStrip = BuildMenu()
         };
@@ -83,6 +88,11 @@ public sealed class TrayHost : IDisposable
     public void UpdateStatus(string status)
     {
         _icon.Text = $"TbxExecutor - {Trim(status)}";
+    }
+
+    public void SetBusy(bool isBusy)
+    {
+        _icon.Icon = isBusy ? _busyIcon : _normalIcon;
     }
 
     private static string Trim(string s)

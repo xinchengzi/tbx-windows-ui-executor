@@ -245,3 +245,148 @@ curl -sS -H "Authorization: Bearer $TBX_TOKEN" \
 - [ ] `runId` with path traversal characters (`../`, `..\\`) is rejected with 400
 - [ ] `stepId` with invalid characters is rejected with 400
 - [ ] Only `[a-zA-Z0-9_-]` pattern is accepted for runId and stepId
+
+---
+
+## Checklist F — Mouse Wheel Input
+
+### F1. Wheel via /input/mouse
+- [ ] `POST /input/mouse` with `kind: "wheel"` scrolls vertically
+- [ ] `dy: -120` scrolls down, `dy: 120` scrolls up
+- [ ] `dx` parameter triggers horizontal scroll (HWHEEL)
+- [ ] Optional `x`, `y` moves cursor before scrolling
+
+```bash
+# Scroll down at position
+curl -X POST http://$TBX_HOST:17890/input/mouse \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"wheel","x":500,"y":300,"dy":-120}'
+```
+
+### F2. Wheel via macro step (input.wheel)
+- [ ] `kind: "input.wheel"` step works in /macro/run
+- [ ] `delta` parameter controls scroll amount
+- [ ] `horizontal: true` triggers horizontal scroll
+- [ ] Error response includes `lastError` for diagnostics
+
+```bash
+# Macro with wheel step
+curl -X POST http://$TBX_HOST:17890/macro/run \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"window.focus","match":{"processName":"QQ"}},
+      {"kind":"input.wheel","x":200,"y":400,"delta":-360}
+    ]
+  }'
+```
+
+### F3. Wheel error diagnostics
+- [ ] On failure, response includes `lastError` Win32 error code
+- [ ] Error message includes operation details (e.g., "wheel dx=0 dy=-120")
+
+---
+
+## Checklist G — Keyboard Input Improvements
+
+### G1. Scan code support
+- [ ] `/input/key` uses scan codes (KEYEVENTF_SCANCODE)
+- [ ] Extended keys (arrows, Delete, Home, etc.) include KEYEVENTF_EXTENDEDKEY
+- [ ] Ctrl+F works reliably in applications
+
+### G2. Enhanced error diagnostics
+- [ ] On failure, response includes `lastError` and detailed message
+- [ ] Error shows which key failed: "INPUT_FAILED: keydown CTRL (vk=0x11, scan=0x1D)"
+
+```bash
+# Test Ctrl+F
+curl -X POST http://$TBX_HOST:17890/input/key \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","F"]}'
+```
+
+---
+
+## Checklist H — Tray Busy Indicator
+
+### H1. Macro busy state
+- [ ] Tray icon changes when macro is running
+- [ ] Icon reverts to normal after macro completes
+- [ ] Works for both successful and failed macros
+
+### H2. Input flash state
+- [ ] Tray icon briefly flashes on `/input/mouse` request
+- [ ] Tray icon briefly flashes on `/input/key` request
+- [ ] Flash duration is approximately 500ms
+- [ ] Multiple rapid inputs keep icon in busy state
+
+### H3. Visual verification
+Run this test sequence and observe tray icon:
+```bash
+# Should flash briefly
+curl -X POST http://$TBX_HOST:17890/input/key \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"press","keys":["CTRL","A"]}'
+
+# Should stay busy during execution
+curl -X POST http://$TBX_HOST:17890/macro/run \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"steps":[{"kind":"sleep","ms":2000}]}'
+```
+
+---
+
+## Manual Test Recipes
+
+### Recipe 1: Scroll QQ chat list
+1. Open QQ and ensure it's visible
+2. Run macro to scroll left panel:
+```bash
+curl -X POST http://$TBX_HOST:17890/macro/run \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"window.focus","match":{"processName":"QQ"}},
+      {"kind":"sleep","ms":200},
+      {"kind":"input.wheel","x":150,"y":400,"delta":-360},
+      {"kind":"sleep","ms":500},
+      {"kind":"input.wheel","x":150,"y":400,"delta":360}
+    ]
+  }'
+```
+3. Verify: QQ list scrolls down then back up
+
+### Recipe 2: Test Ctrl+F in Notepad
+1. Open Notepad with some text
+2. Run:
+```bash
+curl -X POST http://$TBX_HOST:17890/macro/run \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"kind":"window.focus","match":{"processName":"notepad"}},
+      {"kind":"sleep","ms":100},
+      {"kind":"input.key","keys":["CTRL","F"]}
+    ]
+  }'
+```
+3. Verify: Find dialog opens
+
+### Recipe 3: Verify tray busy indicator
+1. Watch tray icon
+2. Run a long macro:
+```bash
+curl -X POST http://$TBX_HOST:17890/macro/run \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"steps":[{"kind":"sleep","ms":3000}]}'
+```
+3. Verify: Tray icon shows busy state for 3 seconds
+

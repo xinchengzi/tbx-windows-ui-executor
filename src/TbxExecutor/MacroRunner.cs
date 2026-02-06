@@ -31,7 +31,10 @@ public sealed record MacroStep(
     int? Y2,
     string[]? Keys,
     int? Ms,
-    MacroHumanize? Humanize);
+    MacroHumanize? Humanize,
+    // Wheel-specific fields
+    int? Delta,
+    bool? Horizontal);
 
 public sealed record MacroWindowMatch(
     string? TitleContains,
@@ -123,7 +126,15 @@ public sealed class MacroRunner
                 "window.focus" => ExecuteWindowFocus(step, stepId),
                 "capture" => ExecuteCapture(step, stepId),
                 "input.mouse" => ExecuteMouseInput(step, stepId, defaults),
+                "input.mouse.move" => ExecuteMouseInput(step, stepId, defaults),
+                "input.mouse.click" => ExecuteMouseInput(step, stepId, defaults),
+                "input.mouse.double" => ExecuteMouseInput(step, stepId, defaults),
+                "input.mouse.right" => ExecuteMouseInput(step, stepId, defaults),
+                "input.mouse.drag" => ExecuteMouseInput(step, stepId, defaults),
+                "input.mouse.wheel" => ExecuteMouseInput(step, stepId, defaults),
+                "input.wheel" => ExecuteWheelInput(step, stepId),
                 "input.key" => ExecuteKeyInput(step, stepId, defaults),
+                "input.key.press" => ExecuteKeyInput(step, stepId, defaults),
                 "sleep" => ExecuteSleep(step, stepId),
                 _ => new MacroStepResult(stepId, false, 400, $"BAD_REQUEST: unknown step kind '{step.Kind}'")
             };
@@ -374,5 +385,39 @@ public sealed class MacroRunner
         }
 
         return new MacroStepResult(stepId, true, Data: new { sleptMs = ms });
+    }
+
+    private MacroStepResult ExecuteWheelInput(MacroStep step, string stepId)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return new MacroStepResult(stepId, false, 501, "NOT_IMPLEMENTED");
+        }
+
+        var delta = step.Delta ?? step.Dy ?? -120;
+        var horizontal = step.Horizontal ?? false;
+        
+        var dx = horizontal ? delta : (step.Dx ?? 0);
+        var dy = horizontal ? 0 : delta;
+
+        var request = new MouseInputRequest(
+            Kind: "wheel",
+            X: step.X,
+            Y: step.Y,
+            Button: null,
+            Dx: dx,
+            Dy: dy,
+            X2: null,
+            Y2: null,
+            Humanize: null);
+
+        var result = _mouseInputProvider.Execute(request);
+        if (!result.Ok)
+        {
+            return new MacroStepResult(stepId, false, result.StatusCode ?? 500, result.Error ?? "UNKNOWN_ERROR", 
+                Data: result.LastError.HasValue ? new { lastError = result.LastError } : null);
+        }
+
+        return new MacroStepResult(stepId, true, Data: new { success = true, delta, horizontal, x = step.X, y = step.Y });
     }
 }
