@@ -8,7 +8,7 @@ public sealed class BusyIndicator : IDisposable
     private readonly object _lock = new();
     private readonly System.Threading.Timer _flashTimer;
     private int _macroCount;
-    private int _flashCount;
+    private bool _isFlashing;
     private bool _disposed;
 
     public event Action<bool>? BusyStateChanged;
@@ -24,8 +24,16 @@ public sealed class BusyIndicator : IDisposable
         {
             lock (_lock)
             {
-                return _macroCount > 0 || _flashCount > 0;
+                return _macroCount > 0 || _isFlashing;
             }
+        }
+    }
+
+    public object GetCounters()
+    {
+        lock (_lock)
+        {
+            return new { macroCount = _macroCount, isFlashing = _isFlashing };
         }
     }
 
@@ -34,7 +42,7 @@ public sealed class BusyIndicator : IDisposable
         bool wasNotBusy;
         lock (_lock)
         {
-            wasNotBusy = !IsBusy;
+            wasNotBusy = !IsBusyInternal();
             _macroCount++;
         }
         if (wasNotBusy) NotifyStateChanged(true);
@@ -46,7 +54,7 @@ public sealed class BusyIndicator : IDisposable
         lock (_lock)
         {
             _macroCount = Math.Max(0, _macroCount - 1);
-            isNowNotBusy = !IsBusy;
+            isNowNotBusy = !IsBusyInternal();
         }
         if (isNowNotBusy) NotifyStateChanged(false);
     }
@@ -56,8 +64,8 @@ public sealed class BusyIndicator : IDisposable
         bool wasNotBusy;
         lock (_lock)
         {
-            wasNotBusy = !IsBusy;
-            _flashCount++;
+            wasNotBusy = !IsBusyInternal();
+            _isFlashing = true;
             _flashTimer.Change(durationMs, Timeout.Infinite);
         }
         if (wasNotBusy) NotifyStateChanged(true);
@@ -68,10 +76,15 @@ public sealed class BusyIndicator : IDisposable
         bool isNowNotBusy;
         lock (_lock)
         {
-            _flashCount = Math.Max(0, _flashCount - 1);
-            isNowNotBusy = !IsBusy;
+            _isFlashing = false;
+            isNowNotBusy = !IsBusyInternal();
         }
         if (isNowNotBusy) NotifyStateChanged(false);
+    }
+
+    private bool IsBusyInternal()
+    {
+        return _macroCount > 0 || _isFlashing;
     }
 
     private void NotifyStateChanged(bool isBusy)
