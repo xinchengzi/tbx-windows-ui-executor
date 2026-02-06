@@ -3,7 +3,7 @@
 This project is designed to run on **Windows 11 x64**.
 
 ## Requirements
-- .NET SDK 8.x (or newer)
+- .NET SDK 10.x (or newer)
 
 ## Build
 From repo root:
