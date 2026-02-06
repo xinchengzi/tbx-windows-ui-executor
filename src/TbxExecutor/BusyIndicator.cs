@@ -6,7 +6,7 @@ namespace TbxExecutor;
 public sealed class BusyIndicator : IDisposable
 {
     private readonly object _lock = new();
-    private readonly Timer _flashTimer;
+    private readonly System.Threading.Timer _flashTimer;
     private int _macroCount;
     private int _flashCount;
     private bool _disposed;
@@ -15,7 +15,7 @@ public sealed class BusyIndicator : IDisposable
 
     public BusyIndicator()
     {
-        _flashTimer = new Timer(OnFlashTimerElapsed, null, Timeout.Infinite, Timeout.Infinite);
+        _flashTimer = new System.Threading.Timer(OnFlashTimerElapsed, null, Timeout.Infinite, Timeout.Infinite);
     }
 
     public bool IsBusy
