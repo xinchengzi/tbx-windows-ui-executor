@@ -13,6 +13,13 @@ public sealed record RunSummary(
     int StepsCount,
     bool HasScreenshots);
 
+public sealed record GetStepsResult(
+    bool Found,
+    string? Content,
+    bool RunDirExists,
+    bool StepsFileExists,
+    bool HasScreenshots);
+
 public sealed class RunsService
 {
     private static readonly string RunsDir = Path.Combine(
@@ -71,27 +78,40 @@ public sealed class RunsService
         return results;
     }
 
-    public (bool Found, string? Content) GetSteps(string runId)
+    public GetStepsResult GetSteps(string runId)
     {
         if (!IsValidRunId(runId))
-            return (false, null);
+            return new GetStepsResult(false, null, false, false, false);
 
-        var stepsPath = Path.Combine(RunsDir, runId, "steps.jsonl");
-        if (!File.Exists(stepsPath))
-            return (false, null);
+        var runDir = Path.Combine(RunsDir, runId);
+        var stepsPath = Path.Combine(runDir, "steps.jsonl");
+        var screenshotsDir = Path.Combine(runDir, "screenshots");
+
+        var runDirExists = Directory.Exists(runDir);
+        var stepsFileExists = File.Exists(stepsPath);
+        var hasScreenshots = Directory.Exists(screenshotsDir) &&
+                             Directory.GetFiles(screenshotsDir, "*.*").Any();
+
+        if (!runDirExists)
+            return new GetStepsResult(false, null, false, false, false);
 
         var fullPath = Path.GetFullPath(stepsPath);
         if (!fullPath.StartsWith(Path.GetFullPath(RunsDir), StringComparison.OrdinalIgnoreCase))
-            return (false, null);
+            return new GetStepsResult(false, null, runDirExists, false, hasScreenshots);
+
+        if (!stepsFileExists)
+        {
+            return new GetStepsResult(true, "", runDirExists, false, hasScreenshots);
+        }
 
         try
         {
             var content = File.ReadAllText(stepsPath);
-            return (true, content);
+            return new GetStepsResult(true, content, runDirExists, true, hasScreenshots);
         }
         catch
         {
-            return (false, null);
+            return new GetStepsResult(true, "", runDirExists, stepsFileExists, hasScreenshots);
         }
     }
 

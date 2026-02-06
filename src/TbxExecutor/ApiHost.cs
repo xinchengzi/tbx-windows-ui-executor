@@ -162,6 +162,16 @@ public sealed class ApiHost : IDisposable
             return Results.Json(ApiResponse.Ok(ctx, payload));
         });
 
+        app.MapGet("/status", (HttpContext ctx) =>
+        {
+            var payload = new
+            {
+                busy = _busyIndicator.IsBusy,
+                counters = _busyIndicator.GetCounters()
+            };
+            return Results.Json(ApiResponse.Ok(ctx, payload));
+        });
+
         app.MapGet("/env", (HttpContext ctx) =>
         {
             // Windows: report per-monitor bounds + dpi/scale (physical pixels)
@@ -599,10 +609,28 @@ public sealed class ApiHost : IDisposable
                 return Results.Json(ApiResponse.Error(ctx, 400, "INVALID_RUN_ID"));
             }
 
-            var (found, content) = runsService.GetSteps(runId!);
-            if (!found || content is null)
+            var result = runsService.GetSteps(runId!);
+            if (!result.Found)
             {
                 return Results.Json(ApiResponse.Error(ctx, 404, "RUN_NOT_FOUND"));
+            }
+
+            var content = result.Content ?? "";
+            
+            if (!result.StepsFileExists)
+            {
+                var diagnosticData = new
+                {
+                    steps = Array.Empty<object>(),
+                    diagnostic = new
+                    {
+                        runDirExists = result.RunDirExists,
+                        stepsFileExists = result.StepsFileExists,
+                        hasScreenshots = result.HasScreenshots,
+                        message = "Run directory exists but steps.jsonl not yet written"
+                    }
+                };
+                return Results.Json(ApiResponse.Ok(ctx, diagnosticData));
             }
 
             ctx.Response.ContentType = "application/x-ndjson";
