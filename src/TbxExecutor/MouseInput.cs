@@ -22,12 +22,37 @@ public interface IMouseInputProvider
     MouseInputResult Execute(MouseInputRequest request);
 }
 
-public sealed record MouseInputResult(bool Ok, string? Error = null, int? StatusCode = null, int? LastError = null);
+public sealed record MouseInputResult(
+    bool Ok, 
+    string? Error = null, 
+    int? StatusCode = null, 
+    int? LastError = null,
+    int? CursorX = null,
+    int? CursorY = null);
+
+public sealed record CursorInfo(
+    int X,
+    int Y,
+    int VirtualScreenX,
+    int VirtualScreenY,
+    int VirtualScreenW,
+    int VirtualScreenH,
+    IntPtr ForegroundHwnd);
+
+public interface ICursorInfoProvider
+{
+    CursorInfo GetCursorInfo();
+}
 
 public sealed class NullMouseInputProvider : IMouseInputProvider
 {
     public MouseInputResult Execute(MouseInputRequest request) =>
         new(false, "NOT_IMPLEMENTED", 501);
+}
+
+public sealed class NullCursorInfoProvider : ICursorInfoProvider
+{
+    public CursorInfo GetCursorInfo() => new(0, 0, 0, 0, 0, 0, IntPtr.Zero);
 }
 
 public sealed class WindowsMouseInputProvider : IMouseInputProvider
@@ -95,12 +120,35 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
 
     private MouseInputResult DoMove(int x, int y, MouseHumanize? humanize)
     {
-        var (absX, absY) = PhysicalToAbsolute(x, y, humanize?.JitterPx ?? 0);
+        var jitter = humanize?.JitterPx ?? 0;
+        var targetX = x;
+        var targetY = y;
+        
+        if (jitter > 0)
+        {
+            targetX += _random.Next(-jitter, jitter + 1);
+            targetY += _random.Next(-jitter, jitter + 1);
+        }
+
+        // Use SetCursorPos as primary method (more reliable for physical cursor movement)
+        if (!SetCursorPos(targetX, targetY))
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
+
+        // Also send SendInput for applications that listen to input events
+        var (absX, absY) = PhysicalToAbsolute(targetX, targetY, 0);
         if (!SendMouseMove(absX, absY))
         {
-            return new(false, $"INPUT_FAILED: move to ({x},{y})", 500, _lastWin32Error);
+            // Get actual cursor position for diagnostics
+            GetCursorPos(out var actualPos);
+            return new(false, $"INPUT_FAILED: move to ({x},{y})", 500, _lastWin32Error, actualPos.X, actualPos.Y);
         }
-        return new(true);
+
+        // Get actual cursor position for response
+        GetCursorPos(out var cursorPos);
+        return new(true, CursorX: cursorPos.X, CursorY: cursorPos.Y);
     }
 
     private MouseInputResult DoClick(int x, int y, MouseButton button, int clicks, MouseHumanize? humanize)
@@ -116,63 +164,91 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
 
             if (!SendMouseClick(button))
             {
-                return new(false, $"INPUT_FAILED: click {button}", 500, _lastWin32Error);
+                GetCursorPos(out var pos);
+                return new(false, $"INPUT_FAILED: click {button}", 500, _lastWin32Error, pos.X, pos.Y);
             }
         }
 
-        return new(true);
+        GetCursorPos(out var cursorPos);
+        return new(true, CursorX: cursorPos.X, CursorY: cursorPos.Y);
     }
 
     private MouseInputResult DoWheel(int? x, int? y, int dx, int dy)
     {
         if (x.HasValue && y.HasValue)
         {
-            var (absX, absY) = PhysicalToAbsolute(x.Value, y.Value, 0);
-            if (!SendMouseMove(absX, absY))
+            // Use SetCursorPos to physically move cursor before wheel
+            if (!SetCursorPos(x.Value, y.Value))
             {
-                return new(false, $"INPUT_FAILED: wheel move to ({x},{y})", 500, _lastWin32Error);
+                _lastWin32Error = Marshal.GetLastWin32Error();
+                CheckAndThrowUac(_lastWin32Error);
             }
         }
 
         if (!SendMouseWheel(dx, dy))
         {
-            return new(false, $"INPUT_FAILED: wheel dx={dx} dy={dy}", 500, _lastWin32Error);
+            GetCursorPos(out var pos);
+            return new(false, $"INPUT_FAILED: wheel dx={dx} dy={dy}", 500, _lastWin32Error, pos.X, pos.Y);
         }
 
-        return new(true);
+        GetCursorPos(out var cursorPos);
+        return new(true, CursorX: cursorPos.X, CursorY: cursorPos.Y);
     }
 
     private MouseInputResult DoDrag(int x1, int y1, int x2, int y2, MouseHumanize? humanize)
     {
-        var (absX1, absY1) = PhysicalToAbsolute(x1, y1, humanize?.JitterPx ?? 0);
+        var jitter = humanize?.JitterPx ?? 0;
+        var targetX1 = x1 + (jitter > 0 ? _random.Next(-jitter, jitter + 1) : 0);
+        var targetY1 = y1 + (jitter > 0 ? _random.Next(-jitter, jitter + 1) : 0);
+
+        if (!SetCursorPos(targetX1, targetY1))
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+            CheckAndThrowUac(_lastWin32Error);
+        }
+
+        var (absX1, absY1) = PhysicalToAbsolute(targetX1, targetY1, 0);
         if (!SendMouseMove(absX1, absY1))
         {
-            return new(false, $"INPUT_FAILED: drag move to ({x1},{y1})", 500, _lastWin32Error);
+            GetCursorPos(out var pos);
+            return new(false, $"INPUT_FAILED: drag move to ({x1},{y1})", 500, _lastWin32Error, pos.X, pos.Y);
         }
 
         ApplyHumanizeDelay(humanize);
 
         if (!SendMouseDown(MouseButton.Left))
         {
-            return new(false, "INPUT_FAILED: drag mouse down", 500, _lastWin32Error);
+            GetCursorPos(out var pos);
+            return new(false, "INPUT_FAILED: drag mouse down", 500, _lastWin32Error, pos.X, pos.Y);
         }
 
         ApplyHumanizeDelay(humanize);
 
-        var (absX2, absY2) = PhysicalToAbsolute(x2, y2, humanize?.JitterPx ?? 0);
+        var targetX2 = x2 + (jitter > 0 ? _random.Next(-jitter, jitter + 1) : 0);
+        var targetY2 = y2 + (jitter > 0 ? _random.Next(-jitter, jitter + 1) : 0);
+
+        if (!SetCursorPos(targetX2, targetY2))
+        {
+            _lastWin32Error = Marshal.GetLastWin32Error();
+        }
+
+        var (absX2, absY2) = PhysicalToAbsolute(targetX2, targetY2, 0);
         if (!SendMouseMove(absX2, absY2))
         {
-            return new(false, $"INPUT_FAILED: drag move to ({x2},{y2})", 500, _lastWin32Error);
+            GetCursorPos(out var pos);
+            return new(false, $"INPUT_FAILED: drag move to ({x2},{y2})", 500, _lastWin32Error, pos.X, pos.Y);
         }
 
         ApplyHumanizeDelay(humanize);
 
         if (!SendMouseUp(MouseButton.Left))
         {
-            return new(false, "INPUT_FAILED: drag mouse up", 500, _lastWin32Error);
+            GetCursorPos(out var pos);
+            return new(false, "INPUT_FAILED: drag mouse up", 500, _lastWin32Error, pos.X, pos.Y);
         }
 
-        return new(true);
+        GetCursorPos(out var cursorPos);
+        return new(true, CursorX: cursorPos.X, CursorY: cursorPos.Y);
     }
 
     private void ApplyHumanizeDelay(MouseHumanize? humanize)
@@ -440,6 +516,22 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int nIndex);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
@@ -472,4 +564,40 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
 public sealed class UacRequiredException : Exception
 {
     public UacRequiredException() : base("Input blocked by UAC/secure desktop") { }
+}
+
+public sealed class WindowsCursorInfoProvider : ICursorInfoProvider
+{
+    private const int SM_XVIRTUALSCREEN = 76;
+    private const int SM_YVIRTUALSCREEN = 77;
+    private const int SM_CXVIRTUALSCREEN = 78;
+    private const int SM_CYVIRTUALSCREEN = 79;
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    public CursorInfo GetCursorInfo()
+    {
+        GetCursorPos(out var pos);
+        var vsX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        var vsY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        var vsW = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        var vsH = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        var fgHwnd = GetForegroundWindow();
+
+        return new CursorInfo(pos.X, pos.Y, vsX, vsY, vsW, vsH, fgHwnd);
+    }
 }

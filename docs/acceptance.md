@@ -390,3 +390,56 @@ curl -X POST http://$TBX_HOST:17890/macro/run \
 ```
 3. Verify: Tray icon shows busy state for 3 seconds
 
+---
+
+## Checklist I — Cursor Movement Verification
+
+### I1. Physical cursor movement
+- [ ] `/input/mouse` with `kind: "move"` physically moves the system cursor
+- [ ] Cursor position change is visible on screen
+- [ ] Response includes `cursorX` and `cursorY` with actual position
+
+```bash
+# Move cursor and verify position
+curl -X POST http://$TBX_HOST:17890/input/mouse \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"move","x":500,"y":300}'
+```
+
+### I2. Debug cursor endpoint
+- [ ] `GET /input/cursor` returns current cursor position
+- [ ] Response includes virtual screen bounds
+- [ ] Response includes foreground window handle
+
+```bash
+# Check cursor position
+curl -X GET http://$TBX_HOST:17890/input/cursor \
+  -H "Authorization: Bearer $TBX_TOKEN" | jq
+```
+
+### I3. Wheel at position
+- [ ] `kind: "wheel"` with `x`, `y` moves cursor before scrolling
+- [ ] Scroll effect is visible at the specified location
+
+```bash
+# Scroll at specific position
+curl -X POST http://$TBX_HOST:17890/input/mouse \
+  -H "Authorization: Bearer $TBX_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"wheel","x":500,"y":300,"dy":-120}'
+```
+
+---
+
+## Checklist J — Tray Icon States
+
+### J1. Icon states
+- [ ] Idle state shows standard application icon (NOT warning/exclamation)
+- [ ] Busy state shows blue circular indicator (NOT yellow warning)
+- [ ] No exclamation mark icon ever appears during normal operation
+
+### J2. State transitions
+- [ ] Icon changes to busy when macro starts
+- [ ] Icon returns to idle when macro completes
+- [ ] Brief flash on single input operations (~500ms)

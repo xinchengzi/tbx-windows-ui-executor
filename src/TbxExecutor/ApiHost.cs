@@ -123,6 +123,9 @@ public sealed class ApiHost : IDisposable
         IKeyInputProvider keyInputProvider = OperatingSystem.IsWindows()
             ? new WindowsKeyInputProvider()
             : new NullKeyInputProvider();
+        ICursorInfoProvider cursorInfoProvider = OperatingSystem.IsWindows()
+            ? new WindowsCursorInfoProvider()
+            : new NullCursorInfoProvider();
 
         // Middleware: lock state guard
         app.Use(async (ctx, next) =>
@@ -428,11 +431,11 @@ public sealed class ApiHost : IDisposable
             if (!result.Ok)
             {
                 var statusCode = result.StatusCode ?? 500;
-                var errorData = result.LastError.HasValue ? new { lastError = result.LastError, message = result.Error } : null;
+                var errorData = new { lastError = result.LastError, message = result.Error, cursorX = result.CursorX, cursorY = result.CursorY };
                 return Results.Json(ApiResponse.ErrorWithData(ctx, statusCode, result.Error ?? "UNKNOWN_ERROR", errorData));
             }
 
-            return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
+            return Results.Json(ApiResponse.Ok(ctx, new { success = true, cursorX = result.CursorX, cursorY = result.CursorY }));
         });
 
         app.MapPost("/input/key", async (HttpContext ctx) =>
@@ -467,6 +470,29 @@ public sealed class ApiHost : IDisposable
             }
 
             return Results.Json(ApiResponse.Ok(ctx, new { success = true }));
+        });
+
+        app.MapGet("/input/cursor", (HttpContext ctx) =>
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return Results.Json(ApiResponse.Error(ctx, 501, "NOT_IMPLEMENTED"));
+            }
+
+            var info = cursorInfoProvider.GetCursorInfo();
+            return Results.Json(ApiResponse.Ok(ctx, new
+            {
+                cursorX = info.X,
+                cursorY = info.Y,
+                virtualScreen = new
+                {
+                    x = info.VirtualScreenX,
+                    y = info.VirtualScreenY,
+                    w = info.VirtualScreenW,
+                    h = info.VirtualScreenH
+                },
+                foregroundHwnd = info.ForegroundHwnd.ToInt64()
+            }));
         });
 
         app.MapPost("/macro/run", async (HttpContext ctx) =>
@@ -512,17 +538,38 @@ public sealed class ApiHost : IDisposable
 
             foreach (var step in result.Steps)
             {
+                string? screenshotPath = null;
+                object? sanitizedResponse = step;
+
+                if (step.Ok && step.Data is not null)
+                {
+                    var dataType = step.Data.GetType();
+                    var imageB64Prop = dataType.GetProperty("imageB64");
+                    var formatProp = dataType.GetProperty("format");
+                    
+                    if (imageB64Prop?.GetValue(step.Data) is string imageB64 && !string.IsNullOrEmpty(imageB64))
+                    {
+                        var format = formatProp?.GetValue(step.Data) as string ?? "png";
+                        try
+                        {
+                            var imageBytes = Convert.FromBase64String(imageB64);
+                            screenshotPath = _runLogger.SaveScreenshot(runId, step.StepId, imageBytes, format);
+                        }
+                        catch { }
+                    }
+                }
+
                 _runLogger.LogStep(runId, new StepLogEntry
                 {
                     StepId = step.StepId,
                     Endpoint = "/macro/run",
                     TsMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     Request = null,
-                    Response = step,
+                    Response = new { stepId = step.StepId, ok = step.Ok, status = step.Status, error = step.Error },
                     Ok = step.Ok,
                     Error = step.Error,
                     DurationMs = null,
-                    ScreenshotPath = null
+                    ScreenshotPath = screenshotPath
                 });
             }
 

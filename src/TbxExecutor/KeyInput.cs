@@ -161,7 +161,7 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
 
     private bool SendKeyDown(ushort vk, ushort scan, bool extended)
     {
-        uint flags = KEYEVENTF_SCANCODE;
+        uint flags = 0;
         if (extended) flags |= KEYEVENTF_EXTENDEDKEY;
 
         var input = new INPUT
@@ -191,7 +191,7 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
 
     private bool SendKeyUp(ushort vk, ushort scan, bool extended)
     {
-        uint flags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
+        uint flags = KEYEVENTF_KEYUP;
         if (extended) flags |= KEYEVENTF_EXTENDEDKEY;
 
         var input = new INPUT

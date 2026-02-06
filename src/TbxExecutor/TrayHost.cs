@@ -18,7 +18,7 @@ public sealed class TrayHost : IDisposable
     {
         _config = config;
         _normalIcon = SystemIcons.Application;
-        _busyIcon = SystemIcons.Warning;
+        _busyIcon = CreateBusyIcon();
         
         _icon = new NotifyIcon
         {
@@ -29,6 +29,23 @@ public sealed class TrayHost : IDisposable
         };
 
         UpdateStatus("Ready");
+    }
+
+    private static Icon CreateBusyIcon()
+    {
+        const int size = 16;
+        using var bmp = new Bitmap(size, size);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(Color.Transparent);
+            using var brush = new SolidBrush(Color.FromArgb(255, 0, 120, 215));
+            g.FillEllipse(brush, 1, 1, size - 3, size - 3);
+            using var pen = new Pen(Color.White, 2f);
+            g.DrawLine(pen, size / 2, 4, size / 2, size / 2);
+            g.DrawLine(pen, size / 2, size / 2, size - 4, size / 2);
+        }
+        return Icon.FromHandle(bmp.GetHicon());
     }
 
     private ContextMenuStrip BuildMenu()

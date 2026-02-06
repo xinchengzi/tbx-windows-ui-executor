@@ -351,6 +351,50 @@ curl -X POST http://100.115.92.6:17890/input/key \
   -d '{"kind":"press","keys":["CTRL","V"],"humanize":{"delayMs":[10,30]}}'
 ```
 
+## GET /input/cursor
+
+Returns the current cursor position, virtual screen bounds, and foreground window handle. Useful for debugging mouse movement issues.
+
+### Response
+
+```json
+{
+  "runId": "abc123",
+  "stepId": "def456",
+  "ok": true,
+  "data": {
+    "cursorX": 500,
+    "cursorY": 300,
+    "virtualScreen": {
+      "x": -1920,
+      "y": 0,
+      "w": 3840,
+      "h": 2160
+    },
+    "foregroundHwnd": 12345678
+  }
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cursorX` | int | Current cursor X position in physical pixels |
+| `cursorY` | int | Current cursor Y position in physical pixels |
+| `virtualScreen.x` | int | Virtual screen origin X (can be negative for multi-monitor) |
+| `virtualScreen.y` | int | Virtual screen origin Y |
+| `virtualScreen.w` | int | Virtual screen width in physical pixels |
+| `virtualScreen.h` | int | Virtual screen height in physical pixels |
+| `foregroundHwnd` | long | Handle of the current foreground window |
+
+### Example
+
+```bash
+curl -X GET http://100.115.92.6:17890/input/cursor \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ## POST /macro/*
 Refused with `409 LOCKED` when the workstation is locked.
 Refused with `429 BUSY` when another macro or input sequence is running.
