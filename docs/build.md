@@ -1,45 +1,54 @@
-# Build & Run (Windows)
+# 构建与运行 (Windows)
 
-This project is designed to run on **Windows 11 x64**.
+本项目设计运行在 **Windows 11 x64** 上。
 
-## Requirements
-- .NET SDK 10.x (or newer)
+## 要求
+- .NET SDK 10.x（或更新版本）
 
-## Build
-From repo root:
+## 构建
 
-```powershell
-cd src/TbxExecutor
-# restore & build
- dotnet build -c Release
-```
-
-## Run
+从仓库根目录：
 
 ```powershell
 cd src/TbxExecutor
- dotnet run
+# 还原依赖并构建
+dotnet build -c Release
 ```
 
-The app starts in the **system tray** and hosts an HTTP API bound to the tailnet interface (configurable).
+## 运行
 
-## Config
+```powershell
+cd src/TbxExecutor
+dotnet run
+```
 
-On first run, a config file is created under:
+应用启动后会在**系统托盘**中显示，并托管一个绑定到 tailnet 接口的 HTTP API（可配置）。
+
+## 配置
+
+首次运行时，会在以下位置创建配置文件：
 
 - `%APPDATA%\TbxExecutor\config.json`
 
-It contains:
-- `listenPort` (default 17890)
-- `allowlistIps` (default `["100.64.0.1"]`)
-- `token` (generated randomly on first run)
+包含：
+- `listenPort`（默认 17890）
+- `allowlistIps`（默认 `["100.64.0.1"]`）
+- `token`（首次运行时随机生成）
 
-You must provide this token to the controller when calling the API:
+调用 API 时必须提供此 token：
 
 ```http
 Authorization: Bearer <token>
 ```
 
-## Safety
-- Input endpoints are refused when the session is locked.
-- UAC / Secure Desktop is not supported (requests should fail fast).
+## 安全性
+
+- 会话锁定时，输入端点会拒绝请求。
+- 不支持 UAC / 安全桌面（请求会快速失败）。
+
+## GitHub Actions 自动构建
+
+推送到 `main` 或 `feat/**` 分支时，会自动触发 Windows 构建：
+
+- 工作流文件：`.github/workflows/build-windows.yml`
+- 构建产物：`tbx-executor-portable-net10-<run_number>`
