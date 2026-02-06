@@ -439,7 +439,7 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
                     mi = new MOUSEINPUT
                     {
                         dwFlags = MOUSEEVENTF_WHEEL,
-                        mouseData = (uint)dy,
+                        mouseData = unchecked((uint)dy),
                         time = 0,
                         dwExtraInfo = IntPtr.Zero
                     }
@@ -457,7 +457,7 @@ public sealed class WindowsMouseInputProvider : IMouseInputProvider
                     mi = new MOUSEINPUT
                     {
                         dwFlags = MOUSEEVENTF_HWHEEL,
-                        mouseData = (uint)dx,
+                        mouseData = unchecked((uint)dx),
                         time = 0,
                         dwExtraInfo = IntPtr.Zero
                     }

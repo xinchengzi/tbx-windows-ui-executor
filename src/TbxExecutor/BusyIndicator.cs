@@ -39,47 +39,49 @@ public sealed class BusyIndicator : IDisposable
 
     public void EnterMacro()
     {
-        bool wasNotBusy;
+        bool shouldNotify;
         lock (_lock)
         {
-            wasNotBusy = !IsBusyInternal();
+            var wasNotBusy = !IsBusyInternal();
             _macroCount++;
+            shouldNotify = wasNotBusy;
         }
-        if (wasNotBusy) NotifyStateChanged(true);
+        if (shouldNotify) NotifyStateChanged(true);
     }
 
     public void ExitMacro()
     {
-        bool isNowNotBusy;
+        bool shouldNotify;
         lock (_lock)
         {
             _macroCount = Math.Max(0, _macroCount - 1);
-            isNowNotBusy = !IsBusyInternal();
+            shouldNotify = !IsBusyInternal();
         }
-        if (isNowNotBusy) NotifyStateChanged(false);
+        if (shouldNotify) NotifyStateChanged(false);
     }
 
     public void FlashBusy(int durationMs = 500)
     {
-        bool wasNotBusy;
+        bool shouldNotify;
         lock (_lock)
         {
-            wasNotBusy = !IsBusyInternal();
+            var wasNotBusy = !IsBusyInternal();
             _isFlashing = true;
             _flashTimer.Change(durationMs, Timeout.Infinite);
+            shouldNotify = wasNotBusy;
         }
-        if (wasNotBusy) NotifyStateChanged(true);
+        if (shouldNotify) NotifyStateChanged(true);
     }
 
     private void OnFlashTimerElapsed(object? state)
     {
-        bool isNowNotBusy;
+        bool shouldNotify;
         lock (_lock)
         {
             _isFlashing = false;
-            isNowNotBusy = !IsBusyInternal();
+            shouldNotify = !IsBusyInternal();
         }
-        if (isNowNotBusy) NotifyStateChanged(false);
+        if (shouldNotify) NotifyStateChanged(false);
     }
 
     private bool IsBusyInternal()

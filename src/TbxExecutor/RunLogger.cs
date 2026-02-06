@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 
@@ -13,12 +14,34 @@ public sealed class RunLogger : IDisposable
         "TbxExecutor",
         "runs");
 
+    private const int MaxCachedRuns = 50;
     private readonly ConcurrentDictionary<string, RunContext> _runs = new();
     private readonly ReaderWriterLockSlim _globalLock = new();
 
     public RunContext GetOrCreateRun(string runId)
     {
-        return _runs.GetOrAdd(runId, id => new RunContext(id, RunsDir));
+        var ctx = _runs.GetOrAdd(runId, id => new RunContext(id, RunsDir));
+        TrimOldRunsIfNeeded();
+        return ctx;
+    }
+
+    private void TrimOldRunsIfNeeded()
+    {
+        if (_runs.Count <= MaxCachedRuns) return;
+
+        var toRemove = _runs
+            .OrderBy(kv => kv.Value.LastAccessUtc)
+            .Take(_runs.Count - MaxCachedRuns)
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var key in toRemove)
+        {
+            if (_runs.TryRemove(key, out var ctx))
+            {
+                ctx.Dispose();
+            }
+        }
     }
 
     public bool HasRun(string runId) => _runs.ContainsKey(runId);
@@ -56,6 +79,7 @@ public sealed class RunContext : IDisposable
     private bool _disposed;
 
     public string RunId { get; }
+    public DateTime LastAccessUtc { get; private set; } = DateTime.UtcNow;
 
     public RunContext(string runId, string runsBaseDir)
     {
@@ -69,9 +93,10 @@ public sealed class RunContext : IDisposable
     {
         lock (_fileLock)
         {
+            LastAccessUtc = DateTime.UtcNow;
             EnsureDirectory();
             EnsureStepsWriter();
-            var json = JsonSerializer.Serialize(entry, StepLogJsonOptions());
+            var json = JsonSerializer.Serialize(entry, StepLogJsonOptions);
             _stepsWriter!.WriteLine(json);
             _stepsWriter.Flush();
         }
@@ -81,6 +106,7 @@ public sealed class RunContext : IDisposable
     {
         lock (_fileLock)
         {
+            LastAccessUtc = DateTime.UtcNow;
             Directory.CreateDirectory(_screenshotsDir);
             var ext = format?.ToLowerInvariant() switch
             {
@@ -106,7 +132,7 @@ public sealed class RunContext : IDisposable
         { AutoFlush = false };
     }
 
-    private static JsonSerializerOptions StepLogJsonOptions() => new()
+    private static JsonSerializerOptions StepLogJsonOptions { get; } = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull

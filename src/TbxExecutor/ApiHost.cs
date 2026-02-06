@@ -149,6 +149,35 @@ public sealed class ApiHost : IDisposable
             await next();
         });
 
+        // Middleware: concurrency guard for input/macro endpoints
+        app.Use(async (ctx, next) =>
+        {
+            var path = ctx.Request.Path;
+            var needsLock = path.StartsWithSegments("/input") || path.StartsWithSegments("/macro");
+
+            if (!needsLock)
+            {
+                await next();
+                return;
+            }
+
+            if (!RunGuard.Instance.TryAcquire())
+            {
+                await Results.Json(ApiResponse.Error(ctx, 429, "BUSY"))
+                    .ExecuteAsync(ctx);
+                return;
+            }
+
+            try
+            {
+                await next();
+            }
+            finally
+            {
+                RunGuard.Instance.Release();
+            }
+        });
+
         // Routes
         app.MapGet("/health", (HttpContext ctx) =>
         {

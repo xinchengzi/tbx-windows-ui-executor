@@ -1,14 +1,15 @@
 # tbx-windows-ui-executor
 
-Windows 11 **tray** Executor: exposes **screenshot + window + input** primitives over **tailnet** (HTTP + Bearer token).
+Windows 11 **托盘**执行器：通过 **tailnet**（HTTP + Bearer token）暴露**截图 + 窗口 + 输入**原语。
 
-- Controller: `mf-kvm01 (100.64.0.1)`
-- Executor: runs on `yc-tbx` (Win11)
+- 控制端：`mf-kvm01 (100.64.0.1)`
+- 执行端：运行在 `yc-tbx` (Win11)
 
-## Docs
-- Spec: `docs/spec.md`
-- Build: `docs/build.md`
-- API: `docs/api.md`
+## 文档
+- 规格：`docs/spec.md`
+- 构建：`docs/build.md`
+- API：`docs/api.md`
+- 进度：`docs/progress.md`
 
-## Status
-M1 skeleton in progress.
+## 状态
+M3 宏执行与证据包已完成。

@@ -20,8 +20,7 @@ public sealed class WindowsLockStateProvider : ILockStateProvider
         var desktop = OpenInputDesktop(0, false, DesktopSwitchDesktop);
         if (desktop == IntPtr.Zero)
         {
-            // TODO: Investigate better detection when OpenInputDesktop fails.
-            return false;
+            return true;
         }
 
         try
@@ -30,8 +29,7 @@ public sealed class WindowsLockStateProvider : ILockStateProvider
             _ = GetUserObjectInformation(desktop, UoiName, IntPtr.Zero, 0, ref size);
             if (size <= 0)
             {
-                // TODO: If size lookup fails, consider alternative lock checks.
-                return false;
+                return true;
             }
 
             var buffer = Marshal.AllocHGlobal(size);
@@ -39,14 +37,13 @@ public sealed class WindowsLockStateProvider : ILockStateProvider
             {
                 if (!GetUserObjectInformation(desktop, UoiName, buffer, size, ref size))
                 {
-                    // TODO: Investigate error handling for GetUserObjectInformation failures.
-                    return false;
+                    return true;
                 }
 
                 var name = Marshal.PtrToStringUni(buffer);
                 if (string.IsNullOrWhiteSpace(name))
                 {
-                    return false;
+                    return true;
                 }
 
                 return string.Equals(name, "Winlogon", StringComparison.OrdinalIgnoreCase);

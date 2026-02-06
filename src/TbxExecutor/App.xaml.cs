@@ -1,6 +1,5 @@
 using System;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace TbxExecutor;
 
@@ -8,19 +7,19 @@ public partial class App : System.Windows.Application
 {
     private TrayHost? _tray;
     private ApiHost? _api;
+    private Mutex? _singleInstanceMutex;
 
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        // No main window; tray-only.
         ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
 
-        // Ensure single instance (best-effort).
-        var createdNew = false;
-        using var mutex = new Mutex(true, "TbxExecutor.Singleton", out createdNew);
+        _singleInstanceMutex = new Mutex(true, "TbxExecutor.Singleton", out var createdNew);
         if (!createdNew)
         {
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
             Shutdown();
             return;
         }
@@ -53,19 +52,14 @@ public partial class App : System.Windows.Application
         {
             _tray.UpdateStatus($"API failed: {ex.Message}");
         }
-
-        // Keep mutex alive until app exits.
-        _ = Task.Run(() =>
-        {
-            while (!Dispatcher.HasShutdownStarted)
-                Thread.Sleep(500);
-        });
     }
 
     protected override void OnExit(System.Windows.ExitEventArgs e)
     {
         _api?.Dispose();
         _tray?.Dispose();
+        _singleInstanceMutex?.ReleaseMutex();
+        _singleInstanceMutex?.Dispose();
         base.OnExit(e);
     }
 }

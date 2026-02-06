@@ -1,7 +1,63 @@
-# Progress Log
+# 进度日志
 
-> Keep this as the single source of truth for development progress.
-> Every entry should include: what changed, how to test, and what's next.
+> 本文档作为开发进度的唯一真实来源。
+> 每条记录应包括：变更内容、测试方法和后续计划。
+
+## 2026-02-06（Bug 修复版本）
+
+### 已完成
+
+修复了代码审查中发现的多个 bug：
+
+#### 严重问题
+1. **RunGuard 并发锁未使用**：在 `/input/*` 和 `/macro/*` 端点添加了并发控制中间件，现在正确返回 `429 BUSY`
+2. **TrayHost Icon 资源泄漏**：添加了 `DestroyIcon` 调用释放 GDI 句柄
+
+#### 中等问题
+3. **App.xaml.cs Mutex 生命周期**：将 Mutex 改为类字段，在 `OnExit` 中正确释放，修复单例保护失效问题
+4. **RunLogger 内存泄漏**：添加过期清理机制，最多缓存 50 个 RunContext，超出时清理最久未使用的
+5. **BusyIndicator 竞态条件**：重构通知逻辑，避免重复事件
+6. **锁屏检测保守策略**：`OpenInputDesktop` 失败时现在返回 `true`（假定锁屏），而非 `false`
+
+#### 轻微问题
+7. **DisplaySelector 空显示器处理**：坐标点不在任何显示器边界内时，返回最近的显示器而非 null
+8. **KeyInput NumLock 扩展键标志**：NumLock 不是扩展键，移除了 `KEYEVENTF_EXTENDEDKEY` 标志
+9. **JsonSerializerOptions 重复创建**：改为静态只读属性，减少 GC 压力
+10. **Mouse Wheel delta 符号**：使用 `unchecked((uint)dy)` 明确转换负数滚轮值
+11. **配置文件原子写入**：先写入临时文件再重命名，防止写入中断导致配置损坏
+
+#### 文档更新
+12. **API 文档翻译**：将 `docs/api.md` 翻译为中文
+
+### 测试方法
+
+1) **并发锁测试**：
+   ```bash
+   # 并发发送两个请求，第二个应返回 429 BUSY
+   curl -X POST http://<host>:17890/macro/run \
+     -H "Authorization: Bearer $TOKEN" \
+     -d '{"steps":[{"kind":"sleep","ms":2000}]}' &
+   sleep 0.1
+   curl -X POST http://<host>:17890/input/mouse \
+     -H "Authorization: Bearer $TOKEN" \
+     -d '{"kind":"click","x":100,"y":100}'
+   # 预期：第二个请求返回 429 BUSY
+   ```
+
+2) **单例保护测试**：
+   - 启动应用后再次尝试启动
+   - 预期：第二个实例应立即退出
+
+3) **锁屏检测测试**：
+   - 锁定工作站 (Win+L)
+   - 发送输入请求
+   - 预期：返回 409 LOCKED
+
+### 说明
+- 所有修复均为最小化更改，未改变现有 API 行为
+- 文档已同步翻译为中文
+
+---
 
 ## 2026-02-05 (Update 4)
 

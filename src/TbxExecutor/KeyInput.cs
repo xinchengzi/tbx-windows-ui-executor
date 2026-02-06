@@ -87,7 +87,7 @@ public sealed class WindowsKeyInputProvider : IKeyInputProvider
         ["PRTSC"] = (0x2C, false),
         ["PAUSE"] = (0x13, false),
         ["CAPSLOCK"] = (0x14, false),
-        ["NUMLOCK"] = (0x90, true),
+        ["NUMLOCK"] = (0x90, false),
         ["SCROLLLOCK"] = (0x91, false),
 
         // Arrow keys (extended)

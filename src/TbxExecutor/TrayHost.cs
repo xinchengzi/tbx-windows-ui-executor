@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace TbxExecutor;
@@ -10,6 +11,7 @@ public sealed class TrayHost : IDisposable
     private readonly ExecutorConfig _config;
     private readonly Icon _normalIcon;
     private readonly Icon _busyIcon;
+    private IntPtr _busyIconHandle;
 
     public event EventHandler? ExitRequested;
     public event EventHandler? RotateTokenRequested;
@@ -18,7 +20,7 @@ public sealed class TrayHost : IDisposable
     {
         _config = config;
         _normalIcon = SystemIcons.Application;
-        _busyIcon = CreateBusyIcon();
+        (_busyIcon, _busyIconHandle) = CreateBusyIcon();
         
         _icon = new NotifyIcon
         {
@@ -31,7 +33,7 @@ public sealed class TrayHost : IDisposable
         UpdateStatus("Ready");
     }
 
-    private static Icon CreateBusyIcon()
+    private static (Icon icon, IntPtr handle) CreateBusyIcon()
     {
         const int size = 16;
         using var bmp = new Bitmap(size, size);
@@ -45,7 +47,8 @@ public sealed class TrayHost : IDisposable
             g.DrawLine(pen, size / 2, 4, size / 2, size / 2);
             g.DrawLine(pen, size / 2, size / 2, size - 4, size / 2);
         }
-        return Icon.FromHandle(bmp.GetHicon());
+        var handle = bmp.GetHicon();
+        return (Icon.FromHandle(handle), handle);
     }
 
     private ContextMenuStrip BuildMenu()
@@ -123,5 +126,14 @@ public sealed class TrayHost : IDisposable
     {
         _icon.Visible = false;
         _icon.Dispose();
+        _busyIcon.Dispose();
+        if (_busyIconHandle != IntPtr.Zero)
+        {
+            DestroyIcon(_busyIconHandle);
+            _busyIconHandle = IntPtr.Zero;
+        }
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 }
