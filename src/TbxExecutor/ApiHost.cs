@@ -698,9 +698,21 @@ public sealed class ApiHost : IDisposable
     public void Dispose()
     {
         if (_app is null) return;
-        try { _app.StopAsync().GetAwaiter().GetResult(); } catch { }
-        try { _app.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+        var app = _app;
         _app = null;
+        
+        // Use Task.Run to avoid deadlock when called from UI thread
+        try
+        {
+            System.Threading.Tasks.Task.Run(async () =>
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+                try { await app.StopAsync(cts.Token); } catch { }
+                try { await app.DisposeAsync(); } catch { }
+            }).GetAwaiter().GetResult();
+        }
+        catch { }
+        
         _runLogger.Dispose();
         _busyIndicator.Dispose();
     }
